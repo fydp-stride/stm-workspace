@@ -36,7 +36,23 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
+typedef struct
+{
+  uint8_t cmd;
+  uint8_t len;
+} bt_header;
 
+typedef struct
+{
+	float x;
+	float y;
+	float z;
+} triple_axis;
+
+typedef struct {
+	triple_axis accel;
+	uint32_t dt;
+} accel_datapoint;
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/
@@ -57,12 +73,10 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define SPI1_CS_Pin GPIO_PIN_0
+#define SPI1_CS_GPIO_Port GPIOA
 #define VCP_TX_Pin GPIO_PIN_2
 #define VCP_TX_GPIO_Port GPIOA
-#define AG_SCL_Pin GPIO_PIN_9
-#define AG_SCL_GPIO_Port GPIOA
-#define AG_SDA_Pin GPIO_PIN_10
-#define AG_SDA_GPIO_Port GPIOA
 #define SWDIO_Pin GPIO_PIN_13
 #define SWDIO_GPIO_Port GPIOA
 #define SWCLK_Pin GPIO_PIN_14
