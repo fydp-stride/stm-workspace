@@ -35,6 +35,7 @@
 #define RESPONSE_CMD 0x02
 #define BT_SEND_TIMEOUT 100
 #define BT_RECV_TIMEOUT 10000
+#define SYNC_BYTE 0xFF
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -60,7 +61,7 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
-char bt_buf[1000];
+uint8_t bt_buf[500];
 
 /* USER CODE END PV */
 
@@ -74,6 +75,7 @@ static void MX_TIM2_Init(void);
 static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
 
+void print_hex(uint8_t* data, uint32_t len);
 static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp,
                               uint16_t len);
 static int32_t platform_read(void *handle, uint8_t reg, uint8_t *bufp,
@@ -84,14 +86,21 @@ float compute_yaw(triple_axis* accel);
 float compute_roll(triple_axis* accel);
 float compute_pitch(triple_axis* accel);
 uint8_t has_impact_occurred(triple_axis* cur_accel, triple_axis* prev_accel);
-void bt_send(void* handle, bt_header* header, void* data);
-void bt_recv(void* handle, bt_header* header, void* data);
+uint8_t bt_send(void* handle, bt_header* header, void* data);
+uint8_t bt_recv(void* handle, bt_header* header, void* data);
 void bt_roundtrip_test(uint32_t count);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+void print_hex(uint8_t* data, uint32_t len) {
+	for (uint32_t i = 0; i < len; i++) {
+		printf("%02x ", data[i]);
+	}
+	printf("\r\n");
+}
 
 static int32_t platform_write(void *handle, uint8_t reg, const uint8_t *bufp,
                               uint16_t len)
@@ -191,41 +200,107 @@ float compute_roll(triple_axis* accel) {
 }
 
 float compute_pitch(triple_axis* accel) {
-	return atan2((- accel->x) , sqrt(accel->y * accel->y + accel->z * accel->z)) * 57.3;
+	return atan2((- accel->y) , sqrt(accel->x * accel->x + accel->z * accel->z)) * 57.3;
 }
 
-void bt_send(void* handle, bt_header* header, void* data) {
-	uint32_t total_len = sizeof(bt_header) + header->len;
-	memcpy(bt_buf, header, sizeof(bt_header));
-	memcpy(bt_buf + sizeof(bt_header), data, header->len);
-	HAL_UART_Transmit(handle, bt_buf, total_len, BT_SEND_TIMEOUT);
+uint8_t bt_send(void* handle, bt_header* header, void* data) {
+	if (header->len < 0 || header->len == SYNC_BYTE) {
+		return 1;
+	}
+	uint8_t* data_bytes = (uint8_t*)data;
+	bt_buf[0] = SYNC_BYTE; // synchronization byte
+	bt_buf[1] = header->cmd;
+
+	uint16_t buf_len = sizeof(uint8_t) + sizeof(bt_header);
+	for (uint8_t i = 0; i < header->len; i++) {
+		if (data_bytes[i] == SYNC_BYTE) {
+			// escape 0xAA by repeating it
+			bt_buf[buf_len] = SYNC_BYTE;
+			bt_buf[buf_len + 1] = SYNC_BYTE;
+			buf_len += 2;
+		} else {
+			bt_buf[buf_len] = data_bytes[i];
+			buf_len++;
+		}
+	}
+
+	header->len = buf_len - sizeof(char) - sizeof(bt_header);
+	bt_buf[2] = header->len;
+
+	if (HAL_UART_Transmit(handle, bt_buf, buf_len, BT_SEND_TIMEOUT) != 0) {
+		return 1;
+	}
+
+	return 0;
 }
 
-void bt_recv(void* handle, bt_header* header, void* data) {
-	HAL_UART_Receive(handle, header, sizeof(bt_header), BT_RECV_TIMEOUT);
-	HAL_UART_Receive(handle, data, header->len, BT_RECV_TIMEOUT);
+uint8_t bt_recv(void* handle, bt_header* header, void* data) {
+	uint8_t cmd;
+	uint8_t len;
+
+	do {
+		uint8_t sync;
+		do {
+			if (HAL_UART_Receive(handle, &sync, sizeof(uint8_t), BT_RECV_TIMEOUT) != 0) {
+				return 1;
+			}
+		} while (sync != SYNC_BYTE);
+		if (HAL_UART_Receive(handle, &cmd, sizeof(uint8_t), BT_RECV_TIMEOUT) != 0) {
+			return 1;
+		}
+	} while (cmd == SYNC_BYTE);
+
+	if (HAL_UART_Receive(handle, &len, sizeof(uint8_t), BT_RECV_TIMEOUT) != 0) {
+		return 1;
+	}
+	if (HAL_UART_Receive(handle, bt_buf, len, BT_RECV_TIMEOUT) != 0) {
+		return 1;
+	}
+	char* data_bytes = (char*)data;
+	uint8_t data_len = 0;
+	uint8_t i;
+	while (i < len) {
+ 		if (bt_buf[i] == SYNC_BYTE) {
+ 			data_bytes[data_len] = SYNC_BYTE;
+			i += 2;
+		} else {
+			data_bytes[data_len] = bt_buf[i];
+			i++;
+		}
+ 		data_len++;
+	}
+	header->cmd = cmd;
+	header->len = data_len;
+
+	return 0;
 }
 
 void bt_roundtrip_test(uint32_t count) {
-	uint32_t sample_impulse_data = 10;
+	uint32_t sample_data[63];
+	uint8_t size = 23;
+	for (uint32_t i = 0; i < size; i++) {
+		sample_data[i] = i;
+	}
 
 	__HAL_TIM_SET_COUNTER(&htim2, 0);
 
 	bt_header header;
 	header.cmd = IMPULSE_CMD;
-	header.len = sizeof(uint32_t);
-	bt_send(&huart1, &header, &sample_impulse_data);
+	header.len = size * sizeof(uint32_t);
+	bt_send(&huart1, &header, sample_data);
 
 	char recv_data[256];
-	bt_recv(&huart1, &header, &recv_data);
+	if (bt_recv(&huart1, &header, &recv_data) == 0) {
+		uint32_t elapsed_time = __HAL_TIM_GetCounter(&htim2);
 
-	uint32_t elapsed_time = __HAL_TIM_GetCounter(&htim2);
-
-	if (header.cmd == RESPONSE_CMD) {
-	  // printf("Received response: %s, Elpased Time: %ld\r\n", recv_data, elapsed_time);
-	  printf("%ld, %ld\r\n", count, elapsed_time);
+		if (header.cmd == RESPONSE_CMD) {
+		  printf("%ld, %ld\r\n", count, elapsed_time);
+		} else {
+		  printf("Unknown response\r\n");
+		}
+		HAL_Delay(1000);
 	} else {
-	  printf("Unknown response\r\n");
+		printf("Timed out\r\n");
 	}
 }
 
@@ -306,16 +381,13 @@ int main(void)
 	  __HAL_TIM_SET_COUNTER(&htim1, 0);
 
 //	  float yaw = compute_yaw(&accel_pt.accel) * 100;
-	  float roll = compute_roll(&accel_pt.accel) * 100;
-	  float pitch = compute_pitch(&accel_pt.accel) * 100;
-	  // printf("%ld, %ld\r\n", (uint32_t)roll, (uint32_t)pitch);
-	  // printf("%ld, %ld, %ld, %ld, %ld\r\n", (uint32_t)accel_pt.accel.x, (uint32_t)accel_pt.accel.y, (uint32_t)accel_pt.accel.z, (uint32_t)roll, (uint32_t)pitch);
-	  // printf("%ld, %ld, %ld, %ld\r\n", accel_pt.dt, (int32_t)accel_pt.accel.x, (int32_t)accel_pt.accel.y, (int32_t)accel_pt.accel.z);
+//	  float roll = compute_roll(&accel_pt.accel) * 100;
+//	  float pitch = compute_pitch(&accel_pt.accel) * 100;
+//	  printf("%ld, %ld\r\n", (int32_t)roll, (int32_t)pitch);
+//	  printf("%ld, %ld, %ld, %ld, %ld\r\n", (uint32_t)accel_pt.accel.x, (uint32_t)accel_pt.accel.y, (uint32_t)accel_pt.accel.z, (uint32_t)roll, (uint32_t)pitch);
+	  printf("%ld, %ld, %ld, %ld\r\n", accel_pt.dt, (int32_t)accel_pt.accel.x, (int32_t)accel_pt.accel.y, (int32_t)accel_pt.accel.z);
 
-	  // char buf[100];
-	  // sprintf(buf, "%ld, %ld, %ld\r\n", accel[0], accel[1], accel[2]);
-
-	  HAL_Delay(500);
+	  HAL_Delay(100);
 //	  HAL_Delay(10);
 
 	  counter++;
