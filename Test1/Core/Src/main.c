@@ -26,8 +26,8 @@
 #include <math.h>
 #include <string.h>
 #include "retarget.h"
-#include "ism330dhcx_reg.h"
 #include "sensor_service.h"
+#include "data_service.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -37,6 +37,8 @@
 #define BT_SEND_TIMEOUT 100
 #define BT_RECV_TIMEOUT 10000
 #define SYNC_BYTE 0xFF
+#define BT_BUF_SIZE 500
+#define DATA_BUF_SIZE 500
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -62,7 +64,9 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
-uint8_t bt_buf[500];
+uint8_t bt_buf[BT_BUF_SIZE];
+
+data_time_point data_buf[DATA_BUF_SIZE];
 
 /* USER CODE END PV */
 
@@ -239,21 +243,16 @@ int main(void)
 
   RetargetInit(&huart2);
 
-  // Initialize accelerometer
-  stmdev_ctx_t dev_ctx;
-  dev_ctx.handle = &hspi1;
-  if (ism330dhcx_init(&dev_ctx) != 0) {
-	  printf("ISM330DHCX initialization failed\r\n");
-	  // while (1);
+  if (accel_init() != ACCEL_OK) {
+	  printf("Accelerometer initialization failed\r\n");
+	  return 0;
   }
 
   HAL_TIM_Base_Start(&htim1);
   HAL_TIM_Base_Start(&htim2);
 
-  uint32_t counter = 0;
-  accel_datapoint accel_pt;
-
-  uint8_t is_data_ready = 0;
+  uint32_t data_buf_idx = 0;
+  triple_axis_accel accel_data;
 
   /* USER CODE END 2 */
 
@@ -262,26 +261,18 @@ int main(void)
 
   while (1)
   {
-//	  do {
-//		  ism330dhcx_xl_flag_data_ready_get(&dev_ctx, &is_data_ready);
-//	  } while (!is_data_ready);
+	  data_time_point* datapoint = &data_buf[data_buf_idx];
 
-	  ism330dhcx_sample_accel(&dev_ctx, &accel_pt.accel);
+	  accel_sample(&accel_data, &datapoint->angle);
+	  datapoint->force = compute_force(&accel_data);
+	  datapoint->timestamp = __HAL_TIM_GetCounter(&htim1);
 
-	  accel_pt.dt = __HAL_TIM_GetCounter(&htim1);
-	  __HAL_TIM_SET_COUNTER(&htim1, 0);
-
-//	  float yaw = compute_yaw(&accel_pt.accel) * 100;
-//	  float roll = compute_roll(&accel_pt.accel) * 100;
-//	  float pitch = compute_pitch(&accel_pt.accel) * 100;
-//	  printf("%ld, %ld\r\n", (int32_t)roll, (int32_t)pitch);
-//	  printf("%ld, %ld, %ld, %ld, %ld\r\n", (uint32_t)accel_pt.accel.x, (uint32_t)accel_pt.accel.y, (uint32_t)accel_pt.accel.z, (uint32_t)roll, (uint32_t)pitch);
-	  printf("%ld, %ld, %ld, %ld\r\n", accel_pt.dt, (int32_t)accel_pt.accel.x, (int32_t)accel_pt.accel.y, (int32_t)accel_pt.accel.z);
+	  printf("%ld, %ld, %ld\r\n", (int32_t)accel_data.x, (int32_t)accel_data.y, (int32_t)accel_data.z);
 
 	  HAL_Delay(100);
 //	  HAL_Delay(10);
 
-	  counter++;
+	  data_buf_idx = (data_buf_idx + 1) % DATA_BUF_SIZE;
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
