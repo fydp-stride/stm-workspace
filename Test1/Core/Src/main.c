@@ -28,17 +28,20 @@
 #include "retarget.h"
 #include "sensor_service.h"
 #include "data_service.h"
+#include "bluetooth_service.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-#define IMPULSE_CMD 0x01
-#define RESPONSE_CMD 0x02
-#define BT_SEND_TIMEOUT 100
-#define BT_RECV_TIMEOUT 10000
-#define SYNC_BYTE 0xFF
-#define BT_BUF_SIZE 500
-#define DATA_BUF_SIZE 500
+#define FORCE_BUF_CAPACITY 500
+#define IMPACT_ANGLE_BUF_CAPACITY 50
+#define IMPACT_FORCE_BUF_CAPACITY 50
+
+#define GRAV_ACCEL 9.81
+#define PEAK_TIME_THRESH_MILLIS 50
+#define PEAK_FORCE_BUF_CAPACITY 100
+
+#define MAX_INT_32 0xffffffff
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -51,6 +54,11 @@
    ({ __typeof__ (a) _a = (a); \
        __typeof__ (b) _b = (b); \
      _a > _b ? _a : _b; })
+
+#define min(a,b) \
+   ({ __typeof__ (a) _a = (a); \
+       __typeof__ (b) _b = (b); \
+     _a < _b ? _a : _b; })
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
@@ -64,9 +72,14 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
-uint8_t bt_buf[BT_BUF_SIZE];
+float user_mass;
 
-data_time_point data_buf[DATA_BUF_SIZE];
+force_point force_buf[FORCE_BUF_CAPACITY];
+float impulse_buffer;
+triple_axis_angle impact_angle_buffer[IMPACT_ANGLE_BUF_CAPACITY];
+uint32_t impact_angle_buffer_size;
+float impact_force_buffer[IMPACT_FORCE_BUF_CAPACITY];
+uint32_t impact_force_buffer_size;
 
 /* USER CODE END PV */
 
@@ -81,8 +94,7 @@ static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
 
 void print_hex(uint8_t* data, uint32_t len);
-uint8_t bt_send(void* handle, bt_header* header, void* data);
-uint8_t bt_recv(void* handle, bt_header* header, void* data);
+
 void bt_roundtrip_test(uint32_t count);
 
 /* USER CODE END PFP */
@@ -97,76 +109,12 @@ void print_hex(uint8_t* data, uint32_t len) {
 	printf("\r\n");
 }
 
-uint8_t bt_send(void* handle, bt_header* header, void* data) {
-	if (header->len < 0 || header->len == SYNC_BYTE) {
-		return 1;
+uint32_t diff_time(uint32_t start, uint32_t end) {
+	if (end < start) {
+		return MAX_INT_32 - end + start;
+	} else {
+		return end - start;
 	}
-	uint8_t* data_bytes = (uint8_t*)data;
-	bt_buf[0] = SYNC_BYTE; // synchronization byte
-	bt_buf[1] = header->cmd;
-
-	uint16_t buf_len = sizeof(uint8_t) + sizeof(bt_header);
-	for (uint8_t i = 0; i < header->len; i++) {
-		if (data_bytes[i] == SYNC_BYTE) {
-			// escape 0xAA by repeating it
-			bt_buf[buf_len] = SYNC_BYTE;
-			bt_buf[buf_len + 1] = SYNC_BYTE;
-			buf_len += 2;
-		} else {
-			bt_buf[buf_len] = data_bytes[i];
-			buf_len++;
-		}
-	}
-
-	header->len = buf_len - sizeof(char) - sizeof(bt_header);
-	bt_buf[2] = header->len;
-
-	if (HAL_UART_Transmit(handle, bt_buf, buf_len, BT_SEND_TIMEOUT) != 0) {
-		return 1;
-	}
-
-	return 0;
-}
-
-uint8_t bt_recv(void* handle, bt_header* header, void* data) {
-	uint8_t cmd;
-	uint8_t len;
-
-	do {
-		uint8_t sync;
-		do {
-			if (HAL_UART_Receive(handle, &sync, sizeof(uint8_t), BT_RECV_TIMEOUT) != 0) {
-				return 1;
-			}
-		} while (sync != SYNC_BYTE);
-		if (HAL_UART_Receive(handle, &cmd, sizeof(uint8_t), BT_RECV_TIMEOUT) != 0) {
-			return 1;
-		}
-	} while (cmd == SYNC_BYTE);
-
-	if (HAL_UART_Receive(handle, &len, sizeof(uint8_t), BT_RECV_TIMEOUT) != 0) {
-		return 1;
-	}
-	if (HAL_UART_Receive(handle, bt_buf, len, BT_RECV_TIMEOUT) != 0) {
-		return 1;
-	}
-	char* data_bytes = (char*)data;
-	uint8_t data_len = 0;
-	uint8_t i;
-	while (i < len) {
- 		if (bt_buf[i] == SYNC_BYTE) {
- 			data_bytes[data_len] = SYNC_BYTE;
-			i += 2;
-		} else {
-			data_bytes[data_len] = bt_buf[i];
-			i++;
-		}
- 		data_len++;
-	}
-	header->cmd = cmd;
-	header->len = data_len;
-
-	return 0;
 }
 
 void bt_roundtrip_test(uint32_t count) {
@@ -253,6 +201,22 @@ int main(void)
 
   uint32_t data_buf_idx = 0;
   triple_axis_accel accel_data;
+  uint8_t is_first_loop = 1;
+  uint8_t is_force_spike = 0;
+  triple_axis_angle angle;
+  triple_axis_angle prev_angle;
+
+  peak_force_point peak_force_buf[PEAK_FORCE_BUF_CAPACITY];
+  uint32_t peak_force_buf_size = 0;
+  peak_force_point new_peak_force;
+  uint32_t last_peak_force_time = 0;
+
+  user_mass = 65;
+  impulse_buffer = 0;
+  impact_angle_buffer_size = 0;
+  impact_force_buffer_size = 0;
+
+  float force_threshold = user_mass * GRAV_ACCEL;
 
   /* USER CODE END 2 */
 
@@ -261,18 +225,96 @@ int main(void)
 
   while (1)
   {
-	  data_time_point* datapoint = &data_buf[data_buf_idx];
+	  force_point* force_pt = &force_buf[data_buf_idx];
+	  force_point* prev_force_pt = &force_buf[(data_buf_idx - 1) % FORCE_BUF_CAPACITY];
 
-	  accel_sample(&accel_data, &datapoint->angle);
-	  datapoint->force = compute_force(&accel_data);
-	  datapoint->timestamp = __HAL_TIM_GetCounter(&htim1);
+	  prev_angle = angle;
+
+	  accel_sample(&accel_data, &angle);
+	  force_pt->force = compute_force(&accel_data);
+	  force_pt->elapsed_time = __HAL_TIM_GetCounter(&htim1);
+	  __HAL_TIM_SET_COUNTER(&htim1, 0);
 
 	  printf("%ld, %ld, %ld\r\n", (int32_t)accel_data.x, (int32_t)accel_data.y, (int32_t)accel_data.z);
+
+	  new_peak_force.index = -1;
+	  if (!is_first_loop) {
+		  uint8_t force_is_increasing = force_pt->force > prev_force_pt->force;
+		  if (!is_force_spike) {
+			  if (force_pt->force > force_threshold && force_is_increasing) {
+				  is_force_spike = 1;
+			  }
+		  } else if (!force_is_increasing) {
+			  new_peak_force.force = prev_force_pt->force;
+			  new_peak_force.angle = prev_angle;
+			  new_peak_force.index = (data_buf_idx - 1) % FORCE_BUF_CAPACITY;
+			  is_force_spike = 0;
+		  }
+	  }
+
+	  if (new_peak_force.index != -1) {
+		  last_peak_force_time = HAL_GetTick();
+		  peak_force_buf[peak_force_buf_size] = new_peak_force;
+		  peak_force_buf_size++;
+	  }
+
+	  if (diff_time(last_peak_force_time, HAL_GetTick()) > PEAK_TIME_THRESH_MILLIS) {
+		  if (peak_force_buf_size > 0) {
+			  uint8_t is_max_peak_force_last = 0;
+			  peak_force_point* max_peak_force = &peak_force_buf[0];
+			  for (uint8_t i = 1; i < peak_force_buf_size; i++) {
+				  if (peak_force_buf[i].force > max_peak_force->force) {
+					  max_peak_force = &peak_force_buf[i];
+					  is_max_peak_force_last = (i == peak_force_buf_size - 1);
+				  }
+			  }
+
+			  if (!is_max_peak_force_last) {
+				  int32_t peak_start_index;
+				  int32_t peak_end_index;
+				  int32_t prev_idx;
+				  int32_t cur_idx;
+
+				  prev_idx = max_peak_force->index;
+				  cur_idx = (prev_idx - 1) % FORCE_BUF_CAPACITY;
+				  while (force_buf[cur_idx].force < force_buf[prev_idx].force) {
+					  prev_idx = cur_idx;
+					  cur_idx = (prev_idx - 1) % FORCE_BUF_CAPACITY;
+				  }
+				  peak_start_index = prev_idx;
+
+				  prev_idx = max_peak_force->index;
+				  cur_idx = (prev_idx + 1) % FORCE_BUF_CAPACITY;
+				  while (force_buf[cur_idx].force < force_buf[prev_idx].force) {
+					  prev_idx = cur_idx;
+					  cur_idx = (prev_idx + 1) % FORCE_BUF_CAPACITY;
+				  }
+				  peak_end_index = prev_idx;
+
+				  if (peak_end_index < peak_start_index) {
+					  peak_end_index = FORCE_BUF_CAPACITY + peak_end_index;
+				  }
+
+				  for (uint8_t i = peak_start_index + 1; i < peak_end_index; i++) {
+					  impulse_buffer += force_buf[i % FORCE_BUF_CAPACITY].force * force_buf[i % FORCE_BUF_CAPACITY].elapsed_time;
+				  }
+
+				  impact_angle_buffer[impact_angle_buffer_size] = max_peak_force->angle;
+				  impact_force_buffer[impact_force_buffer_size] = max_peak_force->force;
+
+				  impact_angle_buffer_size = min(impact_angle_buffer_size + 1, IMPACT_ANGLE_BUF_CAPACITY);
+				  impact_force_buffer_size = min(impact_force_buffer_size + 1, IMPACT_FORCE_BUF_CAPACITY);
+			  }
+			  peak_force_buf_size = 0;
+		  }
+		  last_peak_force_time = HAL_GetTick();
+	  }
 
 	  HAL_Delay(100);
 //	  HAL_Delay(10);
 
-	  data_buf_idx = (data_buf_idx + 1) % DATA_BUF_SIZE;
+	  data_buf_idx = (data_buf_idx + 1) % FORCE_BUF_CAPACITY;
+	  is_first_loop = 0;
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

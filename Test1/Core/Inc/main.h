@@ -35,11 +35,7 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
-typedef struct
-{
-  uint8_t cmd;
-  uint8_t len;
-} bt_header;
+
 
 /* USER CODE END ET */
 
