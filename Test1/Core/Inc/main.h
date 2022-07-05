@@ -31,7 +31,6 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
 /* USER CODE END Includes */
 
 /* Exported types ------------------------------------------------------------*/
@@ -42,17 +41,6 @@ typedef struct
   uint8_t len;
 } bt_header;
 
-typedef struct
-{
-	float x;
-	float y;
-	float z;
-} triple_axis;
-
-typedef struct {
-	triple_axis accel;
-	uint32_t dt;
-} accel_datapoint;
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/
