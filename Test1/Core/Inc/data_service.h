@@ -1,6 +1,8 @@
 #include <math.h>
 #include "sensor_service.h"
 
+#define GRAV_ACCEL 9.81
+
 typedef struct {
   float force;
   uint32_t elapsed_time;

@@ -35,11 +35,15 @@
 
 // If you are using libraries other than HAL, i.e. STDPeriph, change writeRegister and readRegister functions.
 #define SPIhandler hspi1
+#define I2CHandler hi2c1
 extern SPI_HandleTypeDef SPIhandler;
+extern I2C_HandleTypeDef hi2c1;
 
 // GPIO definition
-#define ADXLCS_Pin GPIO_PIN_0
+#define ADXLCS_Pin GPIO_PIN_4
 #define ADXLCS_GPIO_Port GPIOA
+
+#define ADXL_ADDRESS 0x53 << 1
 
 
 // Registers' Address 
@@ -257,20 +261,8 @@ void ADXL_getAccel(void *Data,uint8_t outputType);
 */
 void ADXL_Measure(Switch s);
 
-/** Starts Sleep Mode
-* @param: rate  =  SLEEP_RATE_1HZ
-				   SLEEP_RATE_2HZ
-				   SLEEP_RATE_4HZ
-				   SLEEP_RATE_8HZ
-*/
-void ADXL_Sleep(Switch s,uint8_t rate);
 
-/** Starts Standby Mode
-* @param: s = ON or OFF				 				
-
-*/
-void ADXL_Standby(Switch s);
-
+void ADXL_reset();
 
 /** Reading Main Registers
 regs[0] = BW_RATE
@@ -279,17 +271,6 @@ regs[2] = POWER_CTL
 */
 void ADXL_test(uint8_t * regs);
 
- /**
- Enables the self Test mode
- */
-void ADXL_enableSelfTest(void);
-
-
- /**
- Disables the self Test mode
- */
-void ADXL_disableSelfTest(void);
-
 /**
  Setting the offsets for calibration
 * @param 	user-set offset adjustments in twos complement format
@@ -297,112 +278,5 @@ void ADXL_disableSelfTest(void);
 				
 */				
 void ADXL_SetOffset(int8_t off_x,int8_t off_y,int8_t off_z);
-
-
-
-
-	//////////////////////////////////////////// I N T E R R U P T S //////////////////////
-	///// Important Note: The interrupt routine in your code should be implemented using ADXL_IntProto()
-	///// function!
-
-typedef enum {INT1=0,INT2=1} ADXL_IntOutput;
-#define X_axes 4
-#define Y_axes 2
-#define Z_axes 1
-
-/**  Enabling TAP Int.
-* @param out : ADXL has two Int. pins.
-* @param axes: The axes of tap. Could be OR'ed.
-* @param Duration: The minimum duration for tap detection. The scale factor is 625 us/LSB. Should not be 0!
-* @param Threshold: The threshold value for tap interrupt. The scale factor is 62.5 mg/LSB. Should not be 0!
-*/
-
-void ADXL_enableSingleTap(ADXL_IntOutput out, uint8_t axes, uint8_t Duration, uint8_t Threshold);
-
-
-/** Disabling TAP Int.
-
- The settings are preserved.
-
-*/
-
-void ADXL_disableSingleTap(void);
-
-/**  Enabling Double TAP Int.
-* @param out : 			ADXL has two Int. pins.
-* @param axes: 			The axes of tap. Could be OR'ed.
-* @param Duration: 	The minimum duration for tap detection. The scale factor is 625 us/LSB. Should not be 0!
-* @param Threshold: The threshold value for tap interrupt. The scale factor is 62.5 mg/LSB. Should not be 0!
-* @param Latent: 		The delay time after the first Tap. Scale factor is : 1.25 ms/LSB. Should not be 0!
-* @param Windows:		The time interval between two Taps. Scale factor is : 1.25 ms/LSB.  Should not be 0!
-*/
-
-void ADXL_enableDoubleTap(ADXL_IntOutput out, uint8_t axes, uint8_t Duration, uint8_t Threshold, uint8_t Latent, uint8_t Window);
-
-
-/** Disabling Double TAP Int.
-
- The settings are preserved.
-
-*/
-
-void ADXL_disableDoubleTap(void);
-
-
-
-#define ACTIVITY_AC 1
-#define ACTIVITY_DC 0
-
-
-/**  Enabling Activity Int.
-* @param out : 			ADXL has two Int. pins.
-* @param axes: 			The axes of activity. Could be OR'ed.
-* @param Threshold: The threshold value for activity interrupt. The scale factor is 62.5 mg/LSB. Should not be 0!
-*/
-
-void ADXL_enableActivity(ADXL_IntOutput out, uint8_t axes, uint8_t Threshold, uint8_t AcDc);
-
-
-/** Disabling Double TAP Int.
-
- The settings are preserved.
-
-*/
-
-void ADXL_disableActivity(void);
-
-/**  Enables FreeFall Int.
-* @param out : 			ADXL has two Int. pins.
-* @param time: 			Representing the minimum time that the RSS value of all axes
-										must be less than Threshold to generate a free-fall interrupt.
-										A value of 0 may result in undesirable
-										behavior if the free-fall interrupt is enabled. Values between 100 ms
-										and 350 ms (0x14 to 0x46) are recommended
-* @param Threshold: The root-sumsquare (RSS) value of all axes is calculated and compared with
-										the value in Threshold to determine if a free-fall event occurred.
-										The scale factor is 62.5 mg/LSB. Note that a value of 0 mg may
-										result in undesirable behavior if the free-fall interrupt is enabled.
-										Values between 300 mg and 600 mg (0x05 to 0x09) are
-										recommended.
-					*/
-
-void ADXL_enableFreeFall(ADXL_IntOutput out, uint8_t Threshold, uint8_t Time);
-
-
-/** Disabling Double TAP Int.
-
- The settings are preserved.
-
-*/
-
-void ADXL_disableFreeFall(void);
-
-
-/** Interrupt prototype
-* @brief In order to interrupt flags being reset, the address 0x30 should be read.
-* Put this function wherever you want to implement interrupt routines, e.g. EXTI_Callback
-*/
-
-void ADXL_IntProto(void);
 
 #endif

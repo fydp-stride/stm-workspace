@@ -2,23 +2,23 @@
 #include "sensor_service.h"
 
 
-accelStatus accel_init() {
+sensorStatus accel_init() {
 	ADXL_InitTypeDef adxl_init;
 	adxl_init.SPIMode = SPIMODE_4WIRE;
 	adxl_init.LPMode = LPMODE_NORMAL;
 	adxl_init.Rate = BWRATE_3200;
 	adxl_init.IntMode = INT_ACTIVEHIGH;
-	adxl_init.Resolution = RESOLUTION_FULL;
+	adxl_init.Resolution = RESOLUTION_10BIT;
 	adxl_init.Justify = JUSTIFY_SIGNED;
 	adxl_init.AutoSleep = AUTOSLEEPOFF;
 	adxl_init.Range = RANGE_16G;
 	adxl_init.LinkMode = LINKMODEOFF;
 
 	if (ADXL_Init(&adxl_init) != ADXL_OK) {
-	  return ACCEL_ERR;
+	  return SENSOR_ERR;
 	}
 
-	return ACCEL_OK;
+	return SENSOR_OK;
 }
 
 void accel_sample(triple_axis_accel* accel_data, triple_axis_angle* angle_data) {

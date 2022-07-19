@@ -1,5 +1,28 @@
 #include "bluetooth_service.h"
 
+uint8_t bt_buf[BT_BUF_SIZE];
+
+// uint8_t bt_send_spi(void* handle, void* buf, uint16_t len) {
+// 	HAL_GPIO_WritePin (BT_CS_GPIO_Port, BT_CS_Pin, GPIO_PIN_RESET);
+// 	uint8_t res = HAL_SPI_Transmit (handle, buf, len, BT_SEND_TIMEOUT);
+// 	HAL_GPIO_WritePin (BT_CS_GPIO_Port, BT_CS_Pin, GPIO_PIN_SET);
+// 	return res;
+// }
+
+// uint8_t bt_recv_spi(void* handle, void* buf, uint16_t len) {
+// 	HAL_GPIO_WritePin (BT_CS_GPIO_Port, BT_CS_Pin, GPIO_PIN_RESET);
+// 	uint8_t res = HAL_SPI_Receive (handle, buf, len, BT_SEND_TIMEOUT);
+// 	HAL_GPIO_WritePin (BT_CS_GPIO_Port, BT_CS_Pin, GPIO_PIN_SET);
+// 	return res;
+// }
+
+static void print_hex(uint8_t* data, uint32_t len) {
+	for (uint32_t i = 0; i < len; i++) {
+		printf("%02x ", data[i]);
+	}
+	printf("\r\n");
+}
+
 uint8_t bt_send(void* handle, bt_header* header, void* data) {
 	if (header->len < 0 || header->len == SYNC_BYTE) {
 		return 1;
@@ -31,6 +54,20 @@ uint8_t bt_send(void* handle, bt_header* header, void* data) {
 	return 0;
 }
 
+uint8_t bt_send_impulse(void* handle, float impulse) {
+	bt_header header;
+	header.cmd = IMPULSE_CMD;
+	header.len = sizeof(float);
+	return bt_send(handle, &header, &impulse);
+}
+
+uint8_t bt_send_angles(void*handle, triple_axis_angle* angles, uint8_t len) {
+	bt_header header;
+	header.cmd = ANGLE_CMD;
+	header.len = sizeof(triple_axis_angle) * len;
+	return bt_send(handle, &header, angles);
+}
+
 uint8_t bt_recv(void* handle, bt_header* header, void* data) {
 	uint8_t cmd;
 	uint8_t len;
@@ -55,7 +92,7 @@ uint8_t bt_recv(void* handle, bt_header* header, void* data) {
 	}
 	char* data_bytes = (char*)data;
 	uint8_t data_len = 0;
-	uint8_t i;
+	uint8_t i = 0;
 	while (i < len) {
  		if (bt_buf[i] == SYNC_BYTE) {
  			data_bytes[data_len] = SYNC_BYTE;

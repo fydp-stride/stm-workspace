@@ -15,9 +15,9 @@ typedef struct {
   float pitch;
 } triple_axis_angle;
 
-typedef enum {ACCEL_OK,ACCEL_ERR} accelStatus;
+typedef enum {SENSOR_OK,SENSOR_ERR} sensorStatus;
 
-accelStatus accel_init();
+sensorStatus accel_init();
 void accel_sample(triple_axis_accel* accel_data, triple_axis_angle* angle_data);
 
 #endif
