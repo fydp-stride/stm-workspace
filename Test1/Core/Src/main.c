@@ -32,6 +32,7 @@
 #include "bluetooth_service.h"
 #include "fatfs_sd.h"
 #include "batt_monitor.h"
+#include "sd_logger.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,11 +41,18 @@
 #define IMPACT_ANGLE_BUF_CAPACITY 50
 #define IMPACT_FORCE_BUF_CAPACITY 50
 
-#define GRAV_ACCEL 9.81
 #define PEAK_TIME_THRESH_MILLIS 100
 #define PEAK_FORCE_BUF_CAPACITY 100
 
 #define MAX_INT_32 0xffffffff
+
+#define LOG_SYNC_INTERVAL 5000
+
+#define SEND_STEP_DATA_INTERVAL 500
+// low power interval
+#define SEND_STEP_DATA_LP_INTERVAL 1000
+#define SEND_BATT_DATA_INTERVAL 60000
+#define LOW_POWER_THRESHOLD 20
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -79,13 +87,21 @@ UART_HandleTypeDef huart2;
 /* USER CODE BEGIN PV */
 
 float user_mass;
+float new_user_mass;
+float batt_percent;
 
 force_point force_buf[FORCE_BUF_CAPACITY];
 float impulse_buffer;
-triple_axis_angle impact_angle_buffer[IMPACT_ANGLE_BUF_CAPACITY];
+float impact_angle_buffer[IMPACT_ANGLE_BUF_CAPACITY];
 uint32_t impact_angle_buffer_size;
 float impact_force_buffer[IMPACT_FORCE_BUF_CAPACITY];
 uint32_t impact_force_buffer_size;
+
+uint8_t test_buf[100];
+
+uint8_t is_batt_connected = 1;
+uint8_t is_logging = 1;
+FIL log_file;
 
 /* USER CODE END PV */
 
@@ -101,8 +117,8 @@ static void MX_SPI3_Init(void);
 static void MX_I2C1_Init(void);
 /* USER CODE BEGIN PFP */
 
-void print_hex(uint8_t* data, uint32_t len);
-
+void print_hex(char* data, uint32_t len);
+uint32_t diff_time(uint32_t start, uint32_t end);
 void bt_roundtrip_test(uint32_t count);
 
 /* USER CODE END PFP */
@@ -110,7 +126,7 @@ void bt_roundtrip_test(uint32_t count);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-void print_hex(uint8_t* data, uint32_t len) {
+void print_hex(char* data, uint32_t len) {
 	for (uint32_t i = 0; i < len; i++) {
 		printf("%02x ", data[i]);
 	}
@@ -126,34 +142,30 @@ uint32_t diff_time(uint32_t start, uint32_t end) {
 }
 
 void bt_roundtrip_test(uint32_t count) {
-	float sample_data[1] = {640.54};
+	float sample_data[1] = {0};
 	uint8_t size = 1;
 //	for (uint32_t i = 0; i < size; i++) {
 //		sample_data[i] = i;
 //	}
 
-	__HAL_TIM_SET_COUNTER(&htim2, 0);
+//	__HAL_TIM_SET_COUNTER(&htim2, 0);
+	bt_send(&huart2, IMPULSE_CMD, sample_data, size * sizeof(uint32_t));
 
-	bt_header header;
-	header.cmd = IMPULSE_CMD;
-	header.len = size * sizeof(uint32_t);
-	bt_send(&huart2, &header, sample_data);
-
-	char recv_data[256];
-	if (bt_recv(&huart2, &header, &recv_data) == 0) {
-		uint32_t elapsed_time = __HAL_TIM_GetCounter(&htim2);
-
-		printf("%x\r\n", header.len);
-		if (header.cmd == RESPONSE_CMD) {
-//		  printf("%ld, %ld\r\n", count, elapsed_time);
-		  print_hex(recv_data, header.len);
-		} else {
-		  printf("Unknown response\r\n");
-		}
-		HAL_Delay(1000);
-	} else {
-		printf("Timed out\r\n");
-	}
+//	char recv_data[256];
+//	if (bt_recv(&huart2, &header, &recv_data) == 0) {
+////		uint32_t elapsed_time = __HAL_TIM_GetCounter(&htim2);
+//
+//		printf("%x\r\n", header.len);
+//		if (header.cmd == RESPONSE_CMD) {
+////		  printf("%ld, %ld\r\n", count, elapsed_time);
+//		  print_hex(recv_data, header.len);
+//		} else {
+//		  printf("Unknown response\r\n");
+//		}
+//		HAL_Delay(1000);
+//	} else {
+//		printf("Timed out\r\n");
+//	}
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
@@ -164,35 +176,19 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     }
 }
 
-void adxl_write (uint8_t address, uint8_t value)
-{
-	uint8_t data[2];
-	data[0] = address|0x40;  // multibyte write
-	data[1] = value;
-	HAL_GPIO_WritePin (ACCEL_CS_GPIO_Port, ACCEL_CS_Pin, GPIO_PIN_RESET);  // pull the cs pin low
-	HAL_SPI_Transmit (&hspi1, data, 2, 100);  // write data to register
-	HAL_GPIO_WritePin (ACCEL_CS_GPIO_Port, ACCEL_CS_Pin, GPIO_PIN_SET);  // pull the cs pin high
-}
+//void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+//printf("test\r\n");
+//}
 
-void adxl_read (uint8_t address, uint8_t* value, uint8_t size)
-{
-	address |= 0x80;  // read operation
-	address |= 0x40;
-	HAL_GPIO_WritePin (ACCEL_CS_GPIO_Port, ACCEL_CS_Pin, GPIO_PIN_RESET);  // pull the pin low
-	HAL_SPI_Transmit (&hspi1, &address, 1, 100);  // send address
-	HAL_SPI_Receive (&hspi1, value, size, 100);  // receive 6 bytes data
-	HAL_GPIO_WritePin (ACCEL_CS_GPIO_Port, ACCEL_CS_Pin, GPIO_PIN_SET);  // pull the pin high
-}
-
- void writeRegister(uint8_t address, uint8_t * value, uint8_t num)
- {
- 	HAL_I2C_Mem_Write(&hi2c1, 0x0b << 1, address, 1, value, num, 100);
- }
-
- void readRegister(uint8_t address,uint8_t * value, uint8_t num)
- {
- 	HAL_I2C_Mem_Read (&hi2c1, 0x0b << 1, address, 1, value, num, 100);
- }
+// void writeRegister(uint8_t address, uint8_t * value, uint8_t num)
+// {
+// 	HAL_I2C_Mem_Write(&hi2c1, 0x0b << 1, address, 1, value, num, 100);
+// }
+//
+// void readRegister(uint8_t address,uint8_t * value, uint8_t num)
+// {
+// 	HAL_I2C_Mem_Read (&hi2c1, 0x0b << 1, address, 1, value, num, 100);
+// }
 
 //
 //uint32_t get_timer_elapsed_time(TIM_HandleTypeDef* timer, uint32_t last_count) {
@@ -248,7 +244,11 @@ int main(void)
   }
   if (batt_init() != BATT_OK) {
 	  printf("Battery monitor initialization failed\r\n");
-	  return 0;
+	  is_batt_connected = 0;
+  }
+  if (sd_logger_init(&log_file) != SD_OK) {
+	  printf("SD card logger initialization failed\r\n");
+	  is_logging = 0;
   }
 
   HAL_TIM_Base_Start(&htim1);
@@ -259,7 +259,6 @@ int main(void)
   uint8_t is_first_loop = 1;
   uint8_t is_force_spike = 0;
   triple_axis_angle angle;
-  triple_axis_angle prev_angle;
 
   peak_force_point peak_force_buf[PEAK_FORCE_BUF_CAPACITY];
   uint32_t peak_force_buf_size = 0;
@@ -267,57 +266,30 @@ int main(void)
   uint32_t last_peak_force_time = 0;
 
   user_mass = 65;
+
+  batt_percent = is_batt_connected ? batt_get_percent() : 100;
+
   impulse_buffer = 0;
   impact_angle_buffer_size = 0;
   impact_force_buffer_size = 0;
 
-  float force_threshold = user_mass * GRAV_ACCEL + 400;
+  float force_baseline = user_mass * GRAV_ACCEL;
+  float high_force_threshold = force_baseline + 400;
+  float low_force_threshold = force_baseline - 200;
+  float step_threshold = high_force_threshold * 2;
+  float low_force_lookback_size = 75;
 
-//  uint16_t reg = 1;
-//  writeRegister(0x15, &reg, 2);
-//  reg = 16;
-//  writeRegister(0x0b, &reg, 2);
-//  reg = 1;
-//  writeRegister(0x12, &reg, 2);
-//  reg = 1;
-//  writeRegister(0x16, &reg, 2);
-//
-//  while (1) {
-//		readRegister(0x11, &reg, 2);
-//		printf("%d\r\n", reg);
-//		HAL_Delay(10);
-//  }
-
-//  FATFS fs;
-//  FATFS *pfs;
-//  FIL fil;
-//  FRESULT fres;
-//  DWORD fre_clust;
-//  uint32_t totalSpace, freeSpace;
-//  char buffer[100];
-
-//  if(f_mount(&fs, "", 0) != FR_OK) {
-//	  printf("fail1\r\n");
-//  }
-//
-//  if(f_open(&fil, "first.txt", FA_OPEN_ALWAYS | FA_READ | FA_WRITE) != FR_OK) {
-//	  printf("fail2\r\n");
-//  }
-//
-//  f_puts("STM32 SD Card I/O Example via SPI\n", &fil);
-//
-//  if(f_close(&fil) != FR_OK) {
-//	  printf("fail3\r\n");
-//  }
+  uint32_t last_log_sync_time = HAL_GetTick();
+  uint32_t last_send_step_time = HAL_GetTick();
+  uint32_t last_send_batt_time = HAL_GetTick();
 
 //  uint8_t count = 0xff;
 //  char recv;
-//  whi          le (1) {
-
+//  while (1) {
 //	  bt_roundtrip_test(count);
-	  printf("%ld%%\r\n", (uint32_t)batt_get_percent());
-//	  char data[1] = {0x01};
-//	  HAL_UART_Transmit(&huart2, &count, 1, BT_SEND_TIMEOUT);
+//	  printf("%ld%%\r\n", (uint32_t)batt_get_percent());
+//	  uint8_t data[5] = {1, 2, 0, 3, 4};
+//	  HAL_UART_Transmit(&huart2, data, 5, BT_SEND_TIMEOUT);
 //	  if (HAL_UART_Receive(&huart2, &recv, 1, BT_RECV_TIMEOUT) == 0) {
 //		  printf("%c", recv);
 //	  } else {
@@ -325,8 +297,10 @@ int main(void)
 //	  }
 //	  count++;
 //	  HAL_GPIO_TogglePin(PWR_LED_GPIO_Port, PWR_LED_Pin);
-//	  HAL_Delay(1000);
+//	  HAL_Delay(5000);
 //  }
+
+//  HAL_UART_Receive_IT(&huart2, test_buf, 1);
 
   /* USER CODE END 2 */
 
@@ -339,31 +313,32 @@ int main(void)
 	  force_point* force_pt = &force_buf[data_buf_idx];
 	  force_point* prev_force_pt = &force_buf[(data_buf_idx - 1) % FORCE_BUF_CAPACITY];
 
-	  prev_angle = angle;
-
-	  accel_sample(&accel_data, &angle);
 	  force_pt->force = compute_force(&accel_data);
 	  force_pt->elapsed_time = __HAL_TIM_GetCounter(&htim1);
 	  __HAL_TIM_SET_COUNTER(&htim1, 0);
+	  accel_sample(&accel_data, &force_pt->angle);
 
+	  if (is_logging) {
+		  f_printf(&log_file, "%ld, %ld, %ld, %ld\n", force_pt->elapsed_time, (int32_t)(accel_data.x * 1000), (int32_t)(accel_data.y * 1000), (int32_t)(accel_data.z * 1000));
+	  }
 //	  printf("%ld, %ld, %ld, %ld\r\n", force_pt->elapsed_time, (int32_t)(accel_data.x * 1000), (int32_t)(accel_data.y * 1000), (int32_t)(accel_data.z * 1000));
 //	  printf("%ld, %ld\r\n", (uint32_t)force_pt->elapsed_time, (uint32_t)force_pt->force);
 
-	  new_peak_force.index = -1;
+	  new_peak_force.index = -1; // -1 means no new peak force
 	  if (!is_first_loop) {
 		  uint8_t force_is_increasing = force_pt->force > prev_force_pt->force;
 		  if (!is_force_spike) {
-			  if (force_pt->force > force_threshold && force_is_increasing) {
+			  if (force_pt->force > high_force_threshold && force_is_increasing) {
 				  is_force_spike = 1;
 			  }
 		  } else if (!force_is_increasing) {
 			  new_peak_force.force = prev_force_pt->force;
-			  new_peak_force.angle = prev_angle;
 			  new_peak_force.index = (data_buf_idx - 1) % FORCE_BUF_CAPACITY;
 			  is_force_spike = 0;
 		  }
 	  }
 
+	  // if force has peaked, add it to list of force peaks
 	  if (new_peak_force.index != -1) {
 		  last_peak_force_time = HAL_GetTick();
 		  peak_force_buf[peak_force_buf_size] = new_peak_force;
@@ -371,65 +346,116 @@ int main(void)
 //		   printf("Peak %ld %ld\r\n", (uint32_t)new_peak_force.force, last_peak_force_time);
 	  }
 
+	  // batch forces together, each batch of forces are caused by the same step
 	  if (diff_time(last_peak_force_time, HAL_GetTick()) > PEAK_TIME_THRESH_MILLIS) {
+		  uint8_t is_step = 0;
+		  uint32_t last_low_force_idx = 0;
+		  peak_force_point* max_peak_force = 0;
+
 		  if (peak_force_buf_size > 0) {
-			  uint8_t is_max_peak_force_last = (peak_force_buf_size == 1);
-			  peak_force_point* max_peak_force = &peak_force_buf[0];
+//		      uint8_t is_max_peak_force_last = (peak_force_buf_size == 1);
+			  max_peak_force = &peak_force_buf[0];
+
 			  for (uint8_t i = 1; i < peak_force_buf_size; i++) {
 				  if (peak_force_buf[i].force > max_peak_force->force) {
 					  max_peak_force = &peak_force_buf[i];
-					  is_max_peak_force_last = (i == peak_force_buf_size - 1);
+//					  is_max_peak_force_last = (i == peak_force_buf_size - 1);
 				  }
 			  }
 
-			  if (!is_max_peak_force_last && max_peak_force->force > force_threshold * 2) {
-				  int32_t peak_start_index;
-				  int32_t peak_end_index;
-				  int32_t prev_idx;
-				  int32_t cur_idx;
+			  // expect there to be vibrations after step (maximum peak should not be last in batch)
+			  // and maximum force should exceed threshold
+//			  if (!is_max_peak_force_last) {
+//				  NOT EFFECTIVE
+//			  }
 
-				  prev_idx = max_peak_force->index;
-				  cur_idx = (prev_idx - 1) % FORCE_BUF_CAPACITY;
-				  while (force_buf[cur_idx].force < force_buf[prev_idx].force) {
-					  prev_idx = cur_idx;
-					  cur_idx = (prev_idx - 1) % FORCE_BUF_CAPACITY;
+			  if (max_peak_force->force > step_threshold) {
+				  // expect a dip in force before the foot lands, indicating a step
+				  float min_force = 10000000;
+				  for (uint8_t i = 0; i < low_force_lookback_size; i++) {
+					  uint32_t buf_idx = (max_peak_force->index - i) % FORCE_BUF_CAPACITY;
+					  min_force = min(min_force, force_buf[buf_idx].force);
+					  if (force_buf[buf_idx].force < low_force_threshold) {
+						  is_step = 1;
+						  last_low_force_idx = buf_idx;
+					  }
 				  }
-				  peak_start_index = prev_idx;
-
-				  prev_idx = max_peak_force->index;
-				  cur_idx = (prev_idx + 1) % FORCE_BUF_CAPACITY;
-				  while (force_buf[cur_idx].force < force_buf[prev_idx].force) {
-					  prev_idx = cur_idx;
-					  cur_idx = (prev_idx + 1) % FORCE_BUF_CAPACITY;
+				  if (!is_step) {
+					  printf("No dip %f > %f\r\n", min_force, low_force_threshold);
 				  }
-				  peak_end_index = prev_idx;
-
-				  if (peak_end_index < peak_start_index) {
-					  peak_end_index = FORCE_BUF_CAPACITY + peak_end_index;
-				  }
-
-				  for (uint32_t i = peak_start_index + 1; i < peak_end_index; i++) {
-					  impulse_buffer += force_buf[i % FORCE_BUF_CAPACITY].force * force_buf[i % FORCE_BUF_CAPACITY].elapsed_time / 1000000.0f;
-				  }
-
-				  impact_angle_buffer[impact_angle_buffer_size] = max_peak_force->angle;
-				  impact_force_buffer[impact_force_buffer_size] = max_peak_force->force;
-
-				  impact_angle_buffer_size = min(impact_angle_buffer_size + 1, IMPACT_ANGLE_BUF_CAPACITY);
-				  impact_force_buffer_size = min(impact_force_buffer_size + 1, IMPACT_FORCE_BUF_CAPACITY);
-				  printf("Step - Impulse: %ld, Max Force: %ld, Angle: %ld %ld %ld\r\n", (uint32_t)impulse_buffer, (uint32_t)max_peak_force->force, (uint32_t)max_peak_force->angle.yaw, (uint32_t)max_peak_force->angle.roll, (uint32_t)max_peak_force->angle.pitch);
-
-				  bt_send_impulse(&huart2, impulse_buffer);
-				  impulse_buffer = 0;
-			  } else {
-//				  printf("No step\r\n");
 			  }
 			  peak_force_buf_size = 0;
+		  }
+
+		  if (is_step) {
+			  int32_t peak_start_index;
+			  int32_t peak_end_index;
+
+			  // find where max peak started
+			  peak_start_index = max_peak_force->index;
+			  while (force_buf[peak_start_index].force > high_force_threshold) {
+				  peak_start_index = (peak_start_index - 1) % FORCE_BUF_CAPACITY;
+			  }
+
+			  // find where max peak ends
+			  peak_end_index = max_peak_force->index;
+			  while (force_buf[peak_end_index].force > high_force_threshold) {
+				  peak_end_index = (peak_end_index + 1) % FORCE_BUF_CAPACITY;
+			  }
+
+			  // account for possible wrap-around in force buffer
+			  if (peak_end_index < peak_start_index) {
+				  peak_end_index = FORCE_BUF_CAPACITY + peak_end_index;
+			  }
+
+			  // riemann sum over max force peak
+			  for (uint32_t i = peak_start_index + 1; i < peak_end_index; i++) {
+				  impulse_buffer += force_buf[i % FORCE_BUF_CAPACITY].force * force_buf[i % FORCE_BUF_CAPACITY].elapsed_time / 1000000.0f;
+			  }
+
+			  triple_axis_angle* peak_angle = &force_buf[last_low_force_idx].angle;
+			  // get maximum of the 3 angles
+			  impact_angle_buffer[impact_angle_buffer_size] = max(peak_angle->roll, max(peak_angle->pitch, peak_angle->yaw));
+			  impact_force_buffer[impact_force_buffer_size] = max_peak_force->force;
+
+			  impact_angle_buffer_size = min(impact_angle_buffer_size + 1, IMPACT_ANGLE_BUF_CAPACITY);
+			  impact_force_buffer_size = min(impact_force_buffer_size + 1, IMPACT_FORCE_BUF_CAPACITY);
+			  printf("Step - Impulse: %f, Max Force: %f, Angle: %f %f %f\r\n", impulse_buffer, max_peak_force->force, peak_angle->yaw, peak_angle->roll, peak_angle->pitch);
+		  } else {
+//			  printf("No step\r\n");
 		  }
 		  last_peak_force_time = HAL_GetTick();
 	  }
 
-//	  HAL_Delay(1000);
+	  if (is_logging && HAL_GetTick() - last_log_sync_time > LOG_SYNC_INTERVAL) {
+		  printf("Log sync\r\n");
+	  	  f_sync(&log_file);
+	  	  last_log_sync_time = HAL_GetTick();
+	  }
+
+	  // send step data to mobile device via bluetooth (bt)
+	  uint8_t is_low_power = (batt_percent < LOW_POWER_THRESHOLD);
+	  if (HAL_GetTick() - last_send_step_time > (is_low_power ? SEND_STEP_DATA_LP_INTERVAL : SEND_STEP_DATA_INTERVAL)) {
+		  bt_send_str_float(&huart2, IMPULSE_CMD, impulse_buffer);
+		  bt_send_str_float_array(&huart2, ANGLE_CMD, impact_angle_buffer, impact_angle_buffer_size);
+		  bt_send_str_float_array(&huart2, MAX_FORCE_CMD, impact_force_buffer, impact_force_buffer_size);
+		  impulse_buffer = 0;
+		  impact_angle_buffer_size = 0;
+		  impact_force_buffer_size = 0;
+		  last_send_step_time = HAL_GetTick();
+	  }
+
+	  if (HAL_GetTick() - last_send_batt_time > SEND_BATT_DATA_INTERVAL) {
+		  batt_percent = is_batt_connected ? batt_get_percent() : 100;
+		  bt_send_str_float(&huart2, BATT_CMD, batt_percent);
+		  last_send_batt_time = HAL_GetTick();
+	  }
+
+	  uint8_t recv_result = bt_try_recv_user_mass(&huart2, &new_user_mass);
+	  if (recv_result == BT_OK) {
+		  printf("New user mass: %f\r\n", new_user_mass);
+		  user_mass = new_user_mass;
+	  }
 
 	  data_buf_idx = (data_buf_idx + 1) % FORCE_BUF_CAPACITY;
 	  is_first_loop = 0;
