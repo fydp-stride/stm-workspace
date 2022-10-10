@@ -5,7 +5,7 @@
 
 typedef struct {
   float force;
-  triple_axis_angle angle;
+  angle_vec angle;
   uint32_t elapsed_time;
 } force_point;
 
@@ -16,5 +16,5 @@ typedef struct {
 
 extern float user_mass;
 
-float compute_force(triple_axis_accel* accel);
+float compute_force(accel_vec* accel);
 

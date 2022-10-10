@@ -33,6 +33,7 @@
 #include "fatfs_sd.h"
 #include "batt_monitor.h"
 #include "sd_logger.h"
+#include "bno055_stm32.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -238,27 +239,44 @@ int main(void)
 
   RetargetInit(&huart1);
 
-  if (accel_init() != SENSOR_OK) {
-	  printf("Accelerometer initialization failed\r\n");
-	  return 0;
+  // if (accel_init() != SENSOR_OK) {
+	//   printf("Accelerometer initialization failed\r\n");
+	//   return 0;
+  // }
+  if (imu_init(&hi2c1) != SENSOR_OK) {
+    printf("[Fatal] IMU initialization failed\r\n");
+    return 0;
   }
   if (batt_init() != BATT_OK) {
-	  printf("Battery monitor initialization failed\r\n");
+	  printf("[Warning] Battery monitor initialization failed\r\n");
 	  is_batt_connected = 0;
   }
   if (sd_logger_init(&log_file) != SD_OK) {
-	  printf("SD card logger initialization failed\r\n");
+	  printf("[Warning] SD card logger initialization failed\r\n");
 	  is_logging = 0;
   }
+
+//  while (1)
+//  {
+//    /* USER CODE END WHILE */
+//    bno055_vector_t v = bno055_getVectorAccelerometer();
+//    float x = v.x;
+//    float y = v.y;
+//    float z = v.z;
+//
+//    printf("x: %f y: %f z: %f\r\n", x, y, z);
+//    HAL_Delay(1000);
+//    /* USER CODE BEGIN 3 */
+//  }
 
   HAL_TIM_Base_Start(&htim1);
   HAL_TIM_Base_Start(&htim2);
 
   uint32_t data_buf_idx = 0;
-  triple_axis_accel accel_data;
+  accel_vec accel_data;
   uint8_t is_first_loop = 1;
   uint8_t is_force_spike = 0;
-  triple_axis_angle angle;
+  angle_vec angle;
 
   peak_force_point peak_force_buf[PEAK_FORCE_BUF_CAPACITY];
   uint32_t peak_force_buf_size = 0;
@@ -313,29 +331,34 @@ int main(void)
 	  force_point* force_pt = &force_buf[data_buf_idx];
 	  force_point* prev_force_pt = &force_buf[(data_buf_idx - 1) % FORCE_BUF_CAPACITY];
 
+    imu_sample(&accel_data, &force_pt->angle);
 	  force_pt->force = compute_force(&accel_data);
 	  force_pt->elapsed_time = __HAL_TIM_GetCounter(&htim1);
 	  __HAL_TIM_SET_COUNTER(&htim1, 0);
-	  accel_sample(&accel_data, &force_pt->angle);
-
+	  
 	  if (is_logging) {
 		  f_printf(&log_file, "%ld, %ld, %ld, %ld\n", force_pt->elapsed_time, (int32_t)(accel_data.x * 1000), (int32_t)(accel_data.y * 1000), (int32_t)(accel_data.z * 1000));
 	  }
-//	  printf("%ld, %ld, %ld, %ld\r\n", force_pt->elapsed_time, (int32_t)(accel_data.x * 1000), (int32_t)(accel_data.y * 1000), (int32_t)(accel_data.z * 1000));
+	  // printf("%2.f, %2.f, %2.f\r\n", accel_data.x, accel_data.y, accel_data.z);
+    // HAL_Delay(100);
 //	  printf("%ld, %ld\r\n", (uint32_t)force_pt->elapsed_time, (uint32_t)force_pt->force);
 
 	  new_peak_force.index = -1; // -1 means no new peak force
 	  if (!is_first_loop) {
 		  uint8_t force_is_increasing = force_pt->force > prev_force_pt->force;
 		  if (!is_force_spike) {
+			  // decreasing -> decreasing
 			  if (force_pt->force > high_force_threshold && force_is_increasing) {
+				  // decreasing -> increasing
 				  is_force_spike = 1;
 			  }
 		  } else if (!force_is_increasing) {
+			  // increasing -> decreasing
 			  new_peak_force.force = prev_force_pt->force;
 			  new_peak_force.index = (data_buf_idx - 1) % FORCE_BUF_CAPACITY;
 			  is_force_spike = 0;
 		  }
+		  // increasing -> increasing: do nothing
 	  }
 
 	  // if force has peaked, add it to list of force peaks
@@ -413,7 +436,7 @@ int main(void)
 				  impulse_buffer += force_buf[i % FORCE_BUF_CAPACITY].force * force_buf[i % FORCE_BUF_CAPACITY].elapsed_time / 1000000.0f;
 			  }
 
-			  triple_axis_angle* peak_angle = &force_buf[last_low_force_idx].angle;
+			  angle_vec* peak_angle = &force_buf[last_low_force_idx].angle;
 			  // get maximum of the 3 angles
 			  impact_angle_buffer[impact_angle_buffer_size] = max(peak_angle->roll, max(peak_angle->pitch, peak_angle->yaw));
 			  impact_force_buffer[impact_force_buffer_size] = max_peak_force->force;
