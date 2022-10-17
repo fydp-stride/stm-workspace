@@ -120,7 +120,6 @@ static void MX_I2C3_Init(void);
 
 void print_hex(char* data, uint32_t len);
 uint32_t diff_time(uint32_t start, uint32_t end);
-void bt_roundtrip_test(uint32_t count);
 
 /* USER CODE END PFP */
 
@@ -142,33 +141,6 @@ uint32_t diff_time(uint32_t start, uint32_t end) {
 	}
 }
 
-void bt_roundtrip_test(uint32_t count) {
-	float sample_data[1] = {0};
-	uint8_t size = 1;
-//	for (uint32_t i = 0; i < size; i++) {
-//		sample_data[i] = i;
-//	}
-
-//	__HAL_TIM_SET_COUNTER(&htim2, 0);
-	bt_send(&huart2, IMPULSE_CMD, sample_data, size * sizeof(uint32_t));
-
-//	char recv_data[256];
-//	if (bt_recv(&huart2, &header, &recv_data) == 0) {
-////		uint32_t elapsed_time = __HAL_TIM_GetCounter(&htim2);
-//
-//		printf("%x\r\n", header.len);
-//		if (header.cmd == RESPONSE_CMD) {
-////		  printf("%ld, %ld\r\n", count, elapsed_time);
-//		  print_hex(recv_data, header.len);
-//		} else {
-//		  printf("Unknown response\r\n");
-//		}
-//		HAL_Delay(1000);
-//	} else {
-//		printf("Timed out\r\n");
-//	}
-}
-
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     if(GPIO_Pin == PWR_BTN_Pin)
@@ -176,26 +148,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 //    	HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
     }
 }
-
-//void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-//printf("test\r\n");
-//}
-
-// void writeRegister(uint8_t address, uint8_t * value, uint8_t num)
-// {
-// 	HAL_I2C_Mem_Write(&hi2c1, 0x0b << 1, address, 1, value, num, 100);
-// }
-//
-// void readRegister(uint8_t address,uint8_t * value, uint8_t num)
-// {
-// 	HAL_I2C_Mem_Read (&hi2c1, 0x0b << 1, address, 1, value, num, 100);
-// }
-
-//
-//uint32_t get_timer_elapsed_time(TIM_HandleTypeDef* timer, uint32_t last_count) {
-//	return get_timer_elapsed_count(_HAL_TIM_GetCounter(timer), last_count, timer->Init.Period);
-//}
-
 
 /* USER CODE END 0 */
 
@@ -263,7 +215,6 @@ int main(void)
   accel_vec accel_data;
   uint8_t is_first_loop = 1;
   uint8_t is_force_spike = 0;
-  angle_vec angle;
 
   peak_force_point peak_force_buf[PEAK_FORCE_BUF_CAPACITY];
   uint32_t peak_force_buf_size = 0;
@@ -279,33 +230,15 @@ int main(void)
   impact_force_buffer_size = 0;
 
   float force_baseline = user_mass * GRAV_ACCEL;
-  float high_force_threshold = force_baseline + 400;
-  float low_force_threshold = force_baseline - 200;
+  float high_force_threshold = force_baseline + 600;
+  // TODO: remove because unreliable
+  // float low_force_threshold = force_baseline - 200;
   float step_threshold = high_force_threshold * 2;
   float low_force_lookback_size = 75;
 
   uint32_t last_log_sync_time = HAL_GetTick();
   uint32_t last_send_step_time = HAL_GetTick();
   uint32_t last_send_batt_time = HAL_GetTick();
-
-//  uint8_t count = 0xff;
-//  char recv;
-//  while (1) {
-//	  bt_roundtrip_test(count);
-//	  printf("%ld%%\r\n", (uint32_t)batt_get_percent());
-//	  uint8_t data[5] = {1, 2, 0, 3, 4};
-//	  HAL_UART_Transmit(&huart2, data, 5, BT_SEND_TIMEOUT);
-//	  if (HAL_UART_Receive(&huart2, &recv, 1, BT_RECV_TIMEOUT) == 0) {
-//		  printf("%c", recv);
-//	  } else {
-//		  printf("\r\nTimeout\r\n");
-//	  }
-//	  count++;
-//	  HAL_GPIO_TogglePin(PWR_LED_GPIO_Port, PWR_LED_Pin);
-//	  HAL_Delay(5000);
-//  }
-
-//  HAL_UART_Receive_IT(&huart2, test_buf, 1);
 
   /* USER CODE END 2 */
 
@@ -324,9 +257,19 @@ int main(void)
 	  __HAL_TIM_SET_COUNTER(&htim1, 0);
 	  
 	  if (is_logging) {
-		  f_printf(&log_file, "%ld, %ld, %ld, %ld\n", force_pt->elapsed_time, (int32_t)(accel_data.x * 1000), (int32_t)(accel_data.y * 1000), (int32_t)(accel_data.z * 1000));
+		  f_printf(
+        &log_file,
+        "%ld,%ld,%ld,%ld,%ld,%ld,%ld\n",
+        force_pt->elapsed_time,
+        (int32_t)(accel_data.x * 1000),
+        (int32_t)(accel_data.y * 1000),
+        (int32_t)(accel_data.z * 1000),
+        (int32_t)(force_pt->angle.roll * 1000),
+        (int32_t)(force_pt->angle.pitch * 1000),
+        (int32_t)(force_pt->angle.yaw * 1000)
+      );
 	  }
-	  // printf("%2.f, %2.f, %2.f\r\n", accel_data.x, accel_data.y, accel_data.z);
+	  // printf("%.2f, %.2f, %.2f\r\n", accel_data.x, accel_data.y, accel_data.z);
     // HAL_Delay(100);
 //	  printf("%ld, %ld\r\n", (uint32_t)force_pt->elapsed_time, (uint32_t)force_pt->force);
 
@@ -359,7 +302,8 @@ int main(void)
 	  // batch forces together, each batch of forces are caused by the same step
 	  if (diff_time(last_peak_force_time, HAL_GetTick()) > PEAK_TIME_THRESH_MILLIS) {
 		  uint8_t is_step = 0;
-		  uint32_t last_low_force_idx = 0;
+      // TODO: remove because unreliable
+		  // uint32_t last_low_force_idx = 0;
 		  peak_force_point* max_peak_force = 0;
 
 		  if (peak_force_buf_size > 0) {
@@ -373,26 +317,28 @@ int main(void)
 				  }
 			  }
 
+			  // TODO: remove because unreliable
 			  // expect there to be vibrations after step (maximum peak should not be last in batch)
 			  // and maximum force should exceed threshold
 //			  if (!is_max_peak_force_last) {
-//				  NOT EFFECTIVE
 //			  }
 
 			  if (max_peak_force->force > step_threshold) {
+				  // TODO: remove because unreliable
 				  // expect a dip in force before the foot lands, indicating a step
-				  float min_force = 10000000;
-				  for (uint8_t i = 0; i < low_force_lookback_size; i++) {
-					  uint32_t buf_idx = (max_peak_force->index - i) % FORCE_BUF_CAPACITY;
-					  min_force = min(min_force, force_buf[buf_idx].force);
-					  if (force_buf[buf_idx].force < low_force_threshold) {
-						  is_step = 1;
-						  last_low_force_idx = buf_idx;
-					  }
-				  }
-				  if (!is_step) {
-					  printf("No dip %f > %f\r\n", min_force, low_force_threshold);
-				  }
+//				  float min_force = 10000000;
+//				  for (uint8_t i = 0; i < low_force_lookback_size; i++) {
+//					  uint32_t buf_idx = (max_peak_force->index - i) % FORCE_BUF_CAPACITY;
+//					  min_force = min(min_force, force_buf[buf_idx].force);
+//					  if (force_buf[buf_idx].force < low_force_threshold) {
+//						  is_step = 1;
+//						  last_low_force_idx = buf_idx;
+//					  }
+//				  }
+//				  if (!is_step) {
+//					  printf("No dip %f > %f\r\n", min_force, low_force_threshold);
+//				  }
+				  is_step = 1;
 			  }
 			  peak_force_buf_size = 0;
 		  }
@@ -420,17 +366,39 @@ int main(void)
 
 			  // riemann sum over max force peak
 			  for (uint32_t i = peak_start_index + 1; i < peak_end_index; i++) {
-				  impulse_buffer += force_buf[i % FORCE_BUF_CAPACITY].force * force_buf[i % FORCE_BUF_CAPACITY].elapsed_time / 1000000.0f;
+				  impulse_buffer += 
+            force_buf[i % FORCE_BUF_CAPACITY].force *
+            force_buf[i % FORCE_BUF_CAPACITY].elapsed_time / 1000000.0f;
 			  }
 
-			  angle_vec* peak_angle = &force_buf[last_low_force_idx].angle;
+			  angle_vec* peak_angle = &force_buf[max_peak_force->index].angle;
 			  // get maximum of the 3 angles
 			  impact_angle_buffer[impact_angle_buffer_size] = max(peak_angle->roll, max(peak_angle->pitch, peak_angle->yaw));
 			  impact_force_buffer[impact_force_buffer_size] = max_peak_force->force;
 
 			  impact_angle_buffer_size = min(impact_angle_buffer_size + 1, IMPACT_ANGLE_BUF_CAPACITY);
 			  impact_force_buffer_size = min(impact_force_buffer_size + 1, IMPACT_FORCE_BUF_CAPACITY);
-			  printf("Step - Impulse: %f, Max Force: %f, Angle: %f %f %f\r\n", impulse_buffer, max_peak_force->force, peak_angle->yaw, peak_angle->roll, peak_angle->pitch);
+
+			  printf(
+          "Step - Impulse: %f, Max Force: %f, Angle: %f %f %f\r\n",
+          impulse_buffer,
+          max_peak_force->force,
+          peak_angle->yaw,
+          peak_angle->roll,
+          peak_angle->pitch
+        );
+
+        if (is_logging) {
+          f_printf(
+            &log_file,
+            "> Step,%ld,%ld,%ld,%ld,%ld\r\n",
+            (int32_t)(impulse_buffer * 1000),
+            (int32_t)(max_peak_force->force * 1000),
+            (int32_t)(peak_angle->yaw * 1000),
+            (int32_t)(peak_angle->roll * 1000),
+            (int32_t)(peak_angle->pitch * 1000)
+          );
+        }
 		  } else {
 //			  printf("No step\r\n");
 		  }
@@ -651,7 +619,7 @@ static void MX_SPI1_Init(void)
   hspi1.Instance = SPI1;
   hspi1.Init.Mode = SPI_MODE_MASTER;
   hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi1.Init.DataSize = SPI_DATASIZE_4BIT;
+  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
