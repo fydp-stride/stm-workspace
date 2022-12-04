@@ -245,10 +245,7 @@ int main(void)
 
   float force_baseline = user_mass * GRAV_ACCEL;
   float high_force_threshold = force_baseline + 600;
-  // TODO: remove because unreliable
-  // float low_force_threshold = force_baseline - 200;
   float step_threshold = high_force_threshold * 2;
-  float low_force_lookback_size = 75;
 
   uint32_t last_log_sync_time = HAL_GetTick();
   uint32_t last_send_step_time = HAL_GetTick();
@@ -439,7 +436,7 @@ int main(void)
     // check battery percentage, send batt data, and update power indicator light
 	  if (is_first_loop || HAL_GetTick() - last_send_batt_time > SEND_BATT_DATA_INTERVAL) {
 		  batt_percent = is_batt_connected ? batt_get_percent() : 100;
-      printf("[Info] [main] battery_percent=%f", batt_percent);
+      printf("[Info] [main] battery_percent=%f\r\n", batt_percent);
 		  bt_send_str_float(&huart2, BATT_CMD, batt_percent);
 		  last_send_batt_time = HAL_GetTick();
 
