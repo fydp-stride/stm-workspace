@@ -54,6 +54,8 @@
 #define SEND_STEP_DATA_LP_INTERVAL 1000
 #define SEND_BATT_DATA_INTERVAL 60000
 #define LOW_POWER_THRESHOLD 20
+
+#define SD_CARD_INIT_INTERVAL 500
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -101,8 +103,12 @@ uint32_t impact_force_buffer_size;
 uint8_t test_buf[100];
 
 uint8_t is_batt_connected = 1;
-uint8_t is_logging = 1;
+uint8_t is_sd_card_inserted = 0;
+uint8_t is_logging = 0;
+uint8_t is_sd_init_attempted = 0;
 FIL log_file;
+
+uint32_t last_sd_card_init_time;
 
 /* USER CODE END PV */
 
@@ -141,11 +147,22 @@ uint32_t diff_time(uint32_t start, uint32_t end) {
 	}
 }
 
+uint8_t get_is_sd_card_inserted() {
+  GPIO_PinState sd_cd_state = HAL_GPIO_ReadPin(SD_CD_GPIO_Port, SD_CD_Pin);
+  return sd_cd_state == GPIO_PIN_SET ? 1 : 0;
+}
+
+uint8_t get_is_batt_low_power() {
+  return batt_percent < LOW_POWER_THRESHOLD;
+}
+
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-    if(GPIO_Pin == PWR_BTN_Pin)
-    {
-//    	HAL_GPIO_TogglePin(LD3_GPIO_Port, LD3_Pin);
+    if (GPIO_Pin == SD_CD_Pin) {
+      is_sd_card_inserted = get_is_sd_card_inserted();
+      if (is_sd_card_inserted) {
+        last_sd_card_init_time = HAL_GetTick();
+      }
     }
 }
 
@@ -196,17 +213,14 @@ int main(void)
 	//   return 0;
   // }
   if (imu_init(&hi2c1) != SENSOR_OK) {
-    printf("[Fatal] IMU initialization failed\r\n");
+    printf("[Fatal] [main] IMU initialization failed\r\n");
     return 0;
   }
   if (batt_init() != BATT_OK) {
-	  printf("[Warning] Battery monitor initialization failed\r\n");
+	  printf("[Warning] [main] Battery monitor initialization failed\r\n");
 	  is_batt_connected = 0;
   }
-  if (sd_logger_init(&log_file) != SD_OK) {
-	  printf("[Warning] SD card logger initialization failed\r\n");
-	  is_logging = 0;
-  }
+  is_sd_card_inserted = get_is_sd_card_inserted();
 
   HAL_TIM_Base_Start(&htim1);
   HAL_TIM_Base_Start(&htim2);
@@ -240,6 +254,8 @@ int main(void)
   uint32_t last_send_step_time = HAL_GetTick();
   uint32_t last_send_batt_time = HAL_GetTick();
 
+  printf("[Info] [main] Initialization complete.\r\n");
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -247,6 +263,26 @@ int main(void)
 
   while (1)
   {
+    if (is_sd_card_inserted && !is_sd_init_attempted) {
+      // we don't want to try initializing the card right away since the
+      // connection might not be solid, so we wait for SD_CARD_INIT_INTERVAL
+      // before attempting init
+      // if (HAL_GetTick() - last_sd_card_init_time > SD_CARD_INIT_INTERVAL) {
+      last_sd_card_init_time = HAL_GetTick();
+      is_sd_init_attempted = 1;
+      is_logging = sd_logger_init(&log_file) == SD_OK;
+      if (is_logging) {
+        printf("[Info] [main] SD card initialized\r\n");
+      } else {
+        printf("[Info] [main] SD card initialization failed\r\n");
+      }
+      // }
+    } else if (!is_sd_card_inserted && is_logging) {
+      printf("[Info] [main] SD card ejected\r\n");
+      sd_logger_terminate(&log_file);
+      is_logging = 0;
+      is_sd_init_attempted = 0;
+    }
 
 	  force_point* force_pt = &force_buf[data_buf_idx];
 	  force_point* prev_force_pt = &force_buf[(data_buf_idx - 1) % FORCE_BUF_CAPACITY];
@@ -302,42 +338,18 @@ int main(void)
 	  // batch forces together, each batch of forces are caused by the same step
 	  if (diff_time(last_peak_force_time, HAL_GetTick()) > PEAK_TIME_THRESH_MILLIS) {
 		  uint8_t is_step = 0;
-      // TODO: remove because unreliable
-		  // uint32_t last_low_force_idx = 0;
 		  peak_force_point* max_peak_force = 0;
 
 		  if (peak_force_buf_size > 0) {
-//		      uint8_t is_max_peak_force_last = (peak_force_buf_size == 1);
 			  max_peak_force = &peak_force_buf[0];
 
 			  for (uint8_t i = 1; i < peak_force_buf_size; i++) {
 				  if (peak_force_buf[i].force > max_peak_force->force) {
 					  max_peak_force = &peak_force_buf[i];
-//					  is_max_peak_force_last = (i == peak_force_buf_size - 1);
 				  }
 			  }
 
-			  // TODO: remove because unreliable
-			  // expect there to be vibrations after step (maximum peak should not be last in batch)
-			  // and maximum force should exceed threshold
-//			  if (!is_max_peak_force_last) {
-//			  }
-
 			  if (max_peak_force->force > step_threshold) {
-				  // TODO: remove because unreliable
-				  // expect a dip in force before the foot lands, indicating a step
-//				  float min_force = 10000000;
-//				  for (uint8_t i = 0; i < low_force_lookback_size; i++) {
-//					  uint32_t buf_idx = (max_peak_force->index - i) % FORCE_BUF_CAPACITY;
-//					  min_force = min(min_force, force_buf[buf_idx].force);
-//					  if (force_buf[buf_idx].force < low_force_threshold) {
-//						  is_step = 1;
-//						  last_low_force_idx = buf_idx;
-//					  }
-//				  }
-//				  if (!is_step) {
-//					  printf("No dip %f > %f\r\n", min_force, low_force_threshold);
-//				  }
 				  is_step = 1;
 			  }
 			  peak_force_buf_size = 0;
@@ -407,13 +419,14 @@ int main(void)
 
 	  if (is_logging && HAL_GetTick() - last_log_sync_time > LOG_SYNC_INTERVAL) {
 		  printf("Log sync\r\n");
-	  	  f_sync(&log_file);
-	  	  last_log_sync_time = HAL_GetTick();
+      f_sync(&log_file);
+      last_log_sync_time = HAL_GetTick();
 	  }
 
 	  // send step data to mobile device via bluetooth (bt)
-	  uint8_t is_low_power = (batt_percent < LOW_POWER_THRESHOLD);
-	  if (HAL_GetTick() - last_send_step_time > (is_low_power ? SEND_STEP_DATA_LP_INTERVAL : SEND_STEP_DATA_INTERVAL)) {
+	  uint8_t is_low_power = get_is_batt_low_power();
+    uint32_t bt_send_interval = (is_low_power ? SEND_STEP_DATA_LP_INTERVAL : SEND_STEP_DATA_INTERVAL);
+	  if (HAL_GetTick() - last_send_step_time > bt_send_interval) {
 		  bt_send_str_float(&huart2, IMPULSE_CMD, impulse_buffer);
 		  bt_send_str_float_array(&huart2, ANGLE_CMD, impact_angle_buffer, impact_angle_buffer_size);
 		  bt_send_str_float_array(&huart2, MAX_FORCE_CMD, impact_force_buffer, impact_force_buffer_size);
@@ -423,10 +436,20 @@ int main(void)
 		  last_send_step_time = HAL_GetTick();
 	  }
 
-	  if (HAL_GetTick() - last_send_batt_time > SEND_BATT_DATA_INTERVAL) {
+    // check battery percentage, send batt data, and update power indicator light
+	  if (is_first_loop || HAL_GetTick() - last_send_batt_time > SEND_BATT_DATA_INTERVAL) {
 		  batt_percent = is_batt_connected ? batt_get_percent() : 100;
+      printf("[Info] [main] battery_percent=%f", batt_percent);
 		  bt_send_str_float(&huart2, BATT_CMD, batt_percent);
 		  last_send_batt_time = HAL_GetTick();
+
+      if (is_low_power) {
+        HAL_GPIO_WritePin(LED_RED_GPIO_Port, LED_RED_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_RESET);
+      } else {
+        HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(LED_RED_GPIO_Port, LED_RED_Pin, GPIO_PIN_RESET);
+      }
 	  }
 
 	  uint8_t recv_result = bt_try_recv_user_mass(&huart2, &new_user_mass);
@@ -822,29 +845,44 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(PWR_LED_GPIO_Port, PWR_LED_Pin, GPIO_PIN_SET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(LED_RED_GPIO_Port, LED_RED_Pin, GPIO_PIN_RESET);
+
   /*Configure GPIO pin : PWR_BTN_Pin */
   GPIO_InitStruct.Pin = PWR_BTN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(PWR_BTN_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : SD_CS_Pin */
-  GPIO_InitStruct.Pin = SD_CS_Pin;
+  /*Configure GPIO pins : SD_CS_Pin LED_RED_Pin */
+  GPIO_InitStruct.Pin = SD_CS_Pin|LED_RED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(SD_CS_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PWR_LED_Pin */
-  GPIO_InitStruct.Pin = PWR_LED_Pin;
+  /*Configure GPIO pins : PWR_LED_Pin LED_GREEN_Pin */
+  GPIO_InitStruct.Pin = PWR_LED_Pin|LED_GREEN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(PWR_LED_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : SD_CD_Pin */
+  GPIO_InitStruct.Pin = SD_CD_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(SD_CD_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI0_IRQn);
+
+  HAL_NVIC_SetPriority(EXTI3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI3_IRQn);
 
 }
 

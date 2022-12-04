@@ -399,19 +399,19 @@ void HAL_UART_MspInit(UART_HandleTypeDef* huart)
     PA9     ------> USART1_TX
     PB7     ------> USART1_RX
     */
-    GPIO_InitStruct.Pin = DEBUGER_TX_Pin;
+    GPIO_InitStruct.Pin = DBG_TX_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
     GPIO_InitStruct.Alternate = GPIO_AF7_USART1;
-    HAL_GPIO_Init(DEBUGER_TX_GPIO_Port, &GPIO_InitStruct);
+    HAL_GPIO_Init(DBG_TX_GPIO_Port, &GPIO_InitStruct);
 
-    GPIO_InitStruct.Pin = DEBUGER_RX_Pin;
+    GPIO_InitStruct.Pin = DBG_RX_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
     GPIO_InitStruct.Alternate = GPIO_AF7_USART1;
-    HAL_GPIO_Init(DEBUGER_RX_GPIO_Port, &GPIO_InitStruct);
+    HAL_GPIO_Init(DBG_RX_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN USART1_MspInit 1 */
 
@@ -477,9 +477,9 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef* huart)
     PA9     ------> USART1_TX
     PB7     ------> USART1_RX
     */
-    HAL_GPIO_DeInit(DEBUGER_TX_GPIO_Port, DEBUGER_TX_Pin);
+    HAL_GPIO_DeInit(DBG_TX_GPIO_Port, DBG_TX_Pin);
 
-    HAL_GPIO_DeInit(DEBUGER_RX_GPIO_Port, DEBUGER_RX_Pin);
+    HAL_GPIO_DeInit(DBG_RX_GPIO_Port, DBG_RX_Pin);
 
   /* USER CODE BEGIN USART1_MspDeInit 1 */
 

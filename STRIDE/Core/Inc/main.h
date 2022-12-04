@@ -68,14 +68,21 @@ void Error_Handler(void);
 #define BT_RX_GPIO_Port GPIOA
 #define PWR_LED_Pin GPIO_PIN_0
 #define PWR_LED_GPIO_Port GPIOB
-#define DEBUGER_TX_Pin GPIO_PIN_9
-#define DEBUGER_TX_GPIO_Port GPIOA
+#define LED_GREEN_Pin GPIO_PIN_1
+#define LED_GREEN_GPIO_Port GPIOB
+#define LED_RED_Pin GPIO_PIN_8
+#define LED_RED_GPIO_Port GPIOA
+#define DBG_TX_Pin GPIO_PIN_9
+#define DBG_TX_GPIO_Port GPIOA
 #define SWDIO_Pin GPIO_PIN_13
 #define SWDIO_GPIO_Port GPIOA
 #define SWCLK_Pin GPIO_PIN_14
 #define SWCLK_GPIO_Port GPIOA
-#define DEBUGER_RX_Pin GPIO_PIN_7
-#define DEBUGER_RX_GPIO_Port GPIOB
+#define SD_CD_Pin GPIO_PIN_3
+#define SD_CD_GPIO_Port GPIOB
+#define SD_CD_EXTI_IRQn EXTI3_IRQn
+#define DBG_RX_Pin GPIO_PIN_7
+#define DBG_RX_GPIO_Port GPIOB
 /* USER CODE BEGIN Private defines */
 
 /* USER CODE END Private defines */

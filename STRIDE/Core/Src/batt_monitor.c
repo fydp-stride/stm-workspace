@@ -2,13 +2,13 @@
 
 static void writeRegister(uint8_t address, uint16_t value)
 {
-	HAL_I2C_Mem_Write(&hi2c1, BATT_I2C_DEV_ADDR, address, LC709203F_ADDR_SIZE, (void*)(&value), LC709203F_REG_SIZE, BATT_I2C_TIMEOUT);
+	HAL_I2C_Mem_Write(&hi2c3, BATT_I2C_DEV_ADDR, address, LC709203F_ADDR_SIZE, (void*)(&value), LC709203F_REG_SIZE, BATT_I2C_TIMEOUT);
 }
 
 static uint16_t readRegister(uint8_t address)
 {
 	static uint16_t value = 0;
-	HAL_I2C_Mem_Read(&hi2c1, BATT_I2C_DEV_ADDR, address, LC709203F_ADDR_SIZE, (void*)(&value), LC709203F_REG_SIZE, BATT_I2C_TIMEOUT);
+	HAL_I2C_Mem_Read(&hi2c3, BATT_I2C_DEV_ADDR, address, LC709203F_ADDR_SIZE, (void*)(&value), LC709203F_REG_SIZE, BATT_I2C_TIMEOUT);
 	return value;
 }
 

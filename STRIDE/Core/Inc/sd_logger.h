@@ -8,6 +8,7 @@
 
 typedef enum {SD_OK, SD_ERR} sd_status;
 
-sd_status sd_logger_init();
+sd_status sd_logger_init(FIL* fil);
+sd_status sd_logger_terminate(FIL* fil);
 
 #endif

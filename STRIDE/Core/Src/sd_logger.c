@@ -11,11 +11,16 @@ sd_status sd_logger_init(FIL* fil) {
 	FATFS fs;
 	DIR dir;
 	FILINFO filinfo;
+	FRESULT fres;
 
-	if(f_mount(&fs, "", 0) != FR_OK) {
+	fres = f_mount(&fs, "", 0);
+	if(fres != FR_OK) {
+		printf("[Warning] [sd_logger_init] SD card logger initialization failed RET=%d (f_mount)\r\n", fres);
 		return SD_ERR;
 	}
-	if (f_opendir(&dir, "") != FR_OK) {
+	fres = f_opendir(&dir, "");
+	if (fres != FR_OK) {
+		printf("[Warning] [sd_logger_init] SD card logger initialization failed RET=%d (f_opendir)\r\n", fres);
 		return SD_ERR;
 	}
 
@@ -29,7 +34,27 @@ sd_status sd_logger_init(FIL* fil) {
 
 	char filename_buf[100];
 	sprintf(filename_buf, "%d", max_file_seq + 1);
-	if(f_open(fil, filename_buf, FA_OPEN_ALWAYS | FA_READ | FA_WRITE) != FR_OK) {
+	fres = f_open(fil, filename_buf, FA_OPEN_ALWAYS | FA_READ | FA_WRITE);
+	if(fres != FR_OK) {
+		printf("[Warning] [sd_logger_init] SD card logger initialization failed RET=%d (f_open)\r\n", fres);
+		return SD_ERR;
+	}
+
+	return SD_OK;
+}
+
+sd_status sd_logger_terminate(FIL* fil) {
+	FRESULT fres;
+
+	fres = f_close(fil);
+	if (fres != FR_OK) {
+		printf("[Warning] [sd_logger_init] SD card logger close log file failed RET=%d (f_open)\r\n", fres);
+		return SD_ERR;
+	}
+
+	fres = f_mount(NULL, "", 0);
+	if(fres != FR_OK) {
+		printf("[Warning] [sd_logger_unmount] SD card logger unmount failed RET=%d (f_mount)\r\n", fres);
 		return SD_ERR;
 	}
 

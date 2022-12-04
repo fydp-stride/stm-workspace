@@ -3,8 +3,8 @@
 
 #include "stm32l4xx_hal.h"
 
-#define I2CHandler hi2c1
-extern I2C_HandleTypeDef hi2c1;
+#define I2CHandler hi2c3
+extern I2C_HandleTypeDef hi2c3;
 
 #define BATT_I2C_TIMEOUT 100
 
