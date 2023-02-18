@@ -74,6 +74,8 @@ void Error_Handler(void);
 #define LED_RED_GPIO_Port GPIOA
 #define DBG_TX_Pin GPIO_PIN_9
 #define DBG_TX_GPIO_Port GPIOA
+#define FG_CHG_Pin GPIO_PIN_12
+#define FG_CHG_GPIO_Port GPIOA
 #define SWDIO_Pin GPIO_PIN_13
 #define SWDIO_GPIO_Port GPIOA
 #define SWCLK_Pin GPIO_PIN_14

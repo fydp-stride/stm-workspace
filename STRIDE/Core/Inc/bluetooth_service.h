@@ -40,6 +40,8 @@ typedef enum {BT_OK, BT_ERR, BT_BUSY} bt_status;
 uint8_t bt_send_spi(void* handle, void* buf, uint16_t len);
 uint8_t bt_recv_spi(void* handle, void* buf, uint16_t len);
 uint8_t bt_send(void* handle, uint8_t command, void* data, uint8_t len);
+uint8_t bt_send_str_value(void* handle, uint8_t command, char* value, int len);
+uint8_t bt_send_str_uint16(void* handle, uint8_t command, uint16_t value);
 uint8_t bt_send_float(void* handle, uint8_t command, float value);
 uint8_t bt_send_float_array(void*handle, uint8_t command, float* array, uint8_t len);
 uint8_t bt_send_str_float(void* handle, uint8_t command, float value);

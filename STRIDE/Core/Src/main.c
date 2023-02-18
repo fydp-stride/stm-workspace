@@ -31,9 +31,9 @@
 #include "data_service.h"
 #include "bluetooth_service.h"
 #include "fatfs_sd.h"
-#include "batt_monitor.h"
 #include "sd_logger.h"
 #include "bno055_stm32.h"
+#include "bq27441.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -91,7 +91,7 @@ UART_HandleTypeDef huart2;
 
 float user_mass;
 float new_user_mass;
-float batt_percent;
+uint16_t batt_percent;
 
 force_point force_buf[FORCE_BUF_CAPACITY];
 float impulse_buffer;
@@ -216,9 +216,9 @@ int main(void)
     printf("[Fatal] [main] IMU initialization failed\r\n");
     return 0;
   }
-  if (batt_init() != BATT_OK) {
-	  printf("[Warning] [main] Battery monitor initialization failed\r\n");
-	  is_batt_connected = 0;
+  if (!BQ27441_init(&hi2c3)) {
+    printf("[Warning] [main] Battery monitor initialization failed\r\n");
+    is_batt_connected = 0;
   }
   is_sd_card_inserted = get_is_sd_card_inserted();
 
@@ -236,8 +236,7 @@ int main(void)
   uint32_t last_peak_force_time = 0;
 
   user_mass = 65;
-
-  batt_percent = is_batt_connected ? batt_get_percent() : 100;
+  batt_percent = is_batt_connected ? BQ27441_soc(FILTERED) : 100;
 
   impulse_buffer = 0;
   impact_angle_buffer_size = 0;
@@ -435,9 +434,9 @@ int main(void)
 
     // check battery percentage, send batt data, and update power indicator light
 	  if (is_first_loop || HAL_GetTick() - last_send_batt_time > SEND_BATT_DATA_INTERVAL) {
-		  batt_percent = is_batt_connected ? batt_get_percent() : 100;
-      printf("[Info] [main] battery_percent=%f\r\n", batt_percent);
-		  bt_send_str_float(&huart2, BATT_CMD, batt_percent);
+		  batt_percent = is_batt_connected ? BQ27441_soc(FILTERED) : 100;
+      printf("[Info] [main] battery_percent=%d\r\n", batt_percent);
+		  bt_send_str_uint16(&huart2, BATT_CMD, batt_percent);
 		  last_send_batt_time = HAL_GetTick();
 
       if (is_low_power) {
@@ -867,6 +866,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : FG_CHG_Pin */
+  GPIO_InitStruct.Pin = FG_CHG_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(FG_CHG_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : SD_CD_Pin */
   GPIO_InitStruct.Pin = SD_CD_Pin;

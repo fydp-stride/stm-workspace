@@ -69,37 +69,57 @@ uint8_t bt_send_float_array(void*handle, uint8_t command, float* array, uint8_t 
 	return bt_send(handle, command, array, sizeof(float) * len);
 }
 
-uint8_t bt_send_str_float(void* handle, uint8_t command, float value) {
-	char* str_buf = (char*)(bt_buf + sizeof(bt_header));
-	bt_header* header_buf = (bt_header*)bt_buf;
-	header_buf->sync = 0xff;
-	header_buf->cmd = command;
-	header_buf->len = sprintf(str_buf, "%.2f", value);
-	if (header_buf->len == -1) {
+uint8_t bt_send_str_value(void* handle, uint8_t command, char* value, int len) {
+	if (len <= 0) {
 		return BT_ERR;
 	}
+	char* str_buf = (char*)(bt_buf + sizeof(bt_header));
+	strncpy(str_buf, value, len);
+	bt_header* header_buf = (bt_header*)bt_buf;
+	header_buf->sync = SYNC_BYTE;
+	header_buf->cmd = command;
+	header_buf->len = len;
+	
+	// for (unsigned int i = 0; i < (len + sizeof(bt_header)); i++) {
+	// 	printf("%x ", bt_buf[i]);
+	// }
+	// printf("(");
+	// for (unsigned int i = sizeof(bt_header); i < (len + sizeof(bt_header)); i++) {
+	// 	printf("%c", bt_buf[i]);
+	// }
+	// printf(")\r\n");
+
 	HAL_UART_Transmit(handle, bt_buf, header_buf->len + sizeof(bt_header), BT_SEND_TIMEOUT);
 	return BT_OK;
+}
+
+uint8_t bt_send_str_uint16(void* handle, uint8_t command, uint16_t value) {
+	char str_buf[BT_BUF_SIZE];
+	int len = sprintf(str_buf, "%d", value);
+	return bt_send_str_value(handle, command, str_buf, len);
+}
+
+uint8_t bt_send_str_float(void* handle, uint8_t command, float value) {
+	char str_buf[BT_BUF_SIZE];
+	int len = sprintf(str_buf, "%.2f", value);
+	return bt_send_str_value(handle, command, str_buf, len);
 }
 
 uint8_t bt_send_str_float_array(void* handle, uint8_t command, float* array, uint8_t len) {
 	if (len == 0) {
 		return BT_ERR;
 	}
-	bt_header* header_buf = (bt_header*)bt_buf;
-	header_buf->sync = 0xff;
-	header_buf->cmd = command;
-	header_buf->len = 0;
+	char str_buf[BT_BUF_SIZE];
+	int str_len = 0;
 	for (int i = 0; i < len; i++) {
-		char* str_buf = (char*)(bt_buf + sizeof(bt_header) + header_buf->len);
-		int res = sprintf(str_buf, "%.2f,", array[i]);
+		char* buf_offset = (char*)(str_buf + str_len);
+		int res = sprintf(buf_offset, "%.2f,", array[i]);
 		if (res == -1) {
 			return BT_ERR;
 		}
-		header_buf->len += res;
+		str_len += res;
 	}
-	HAL_UART_Transmit(handle, bt_buf, header_buf->len + sizeof(bt_header), BT_SEND_TIMEOUT);
-	return BT_OK;
+	return bt_send_str_value(handle, command, str_buf, str_len);
 }
 
 uint8_t bt_recv(void* handle, bt_header* header, void* data) {

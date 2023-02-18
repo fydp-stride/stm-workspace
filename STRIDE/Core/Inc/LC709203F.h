@@ -1,5 +1,5 @@
-#ifndef BATT_MONITOR_H
-#define BATT_MONITOR_H
+#ifndef LC709203F_H
+#define LC709203F_H
 
 #include "stm32l4xx_hal.h"
 
@@ -54,14 +54,14 @@ typedef enum {
   LC709203F_APA_3000MAH = 0x36,
 } lc709203_adjustment_t;
 
-typedef enum {BATT_OK, BATT_ERR} batt_status;
+typedef enum {BATT_OK, BATT_ERR} LC709203F_status;
 
-batt_status batt_init();
-uint16_t batt_get_ic_version();
-void batt_set_power_mode(lc709203_powermode_t val);
-void batt_set_pack_size(lc709203_adjustment_t val);
-void batt_set_profile(uint16_t val);
-void batt_send_temp_mode(lc709203_tempmode_t val);
-float batt_get_percent();
+LC709203F_status LC709203F_init();
+uint16_t LC709203F_get_ic_version();
+void LC709203F_set_power_mode(lc709203_powermode_t val);
+void LC709203F_set_pack_size(lc709203_adjustment_t val);
+void LC709203F_set_profile(uint16_t val);
+void LC709203F_send_temp_mode(lc709203_tempmode_t val);
+float LC709203F_get_percent();
 
 #endif
