@@ -4,6 +4,12 @@
         "stdio.h": "c",
         "sensor_service.h": "c",
         "bq27441.h": "c",
-        "stm32l4xx_hal.h": "c"
+        "stm32l4xx_hal.h": "c",
+        "bluetooth_service.h": "c",
+        "string.h": "c",
+        "debug_console.h": "c",
+        "stdlib.h": "c",
+        "stdbool.h": "c",
+        "retarget.h": "c"
     }
 }

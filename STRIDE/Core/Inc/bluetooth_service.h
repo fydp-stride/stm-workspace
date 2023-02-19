@@ -2,17 +2,20 @@
 #define BLUETOOTH_SERVICE_H
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <string.h>
 #include "stm32l4xx_hal.h"
 #include "retarget.h"
 #include "sensor_service.h"
-#include <string.h>
 
-#define IMPULSE_CMD 0x01
-#define MAX_FORCE_CMD 0x02
-#define ANGLE_CMD 0x03
-#define BATT_CMD 0x04
-#define WEIGHT_CMD 0x05
-#define RESPONSE_CMD 0x06
+#define BT_IMPULSE_CMD 0x01
+#define BT_MAX_FORCE_CMD 0x02
+#define BT_ANGLE_CMD 0x03
+#define BT_BATT_CMD 0x04
+#define BT_WEIGHT_CMD 0x05
+#define BT_RESPONSE_CMD 0x06
+#define BT_CALIBRATE_CMD 0x07
 
 #define BT_SEND_TIMEOUT 100
 #define BT_RECV_TIMEOUT 10000
@@ -37,17 +40,16 @@ typedef struct
 
 typedef enum {BT_OK, BT_ERR, BT_BUSY} bt_status;
 
-uint8_t bt_send_spi(void* handle, void* buf, uint16_t len);
-uint8_t bt_recv_spi(void* handle, void* buf, uint16_t len);
-uint8_t bt_send(void* handle, uint8_t command, void* data, uint8_t len);
-uint8_t bt_send_str_value(void* handle, uint8_t command, char* value, int len);
-uint8_t bt_send_str_uint16(void* handle, uint8_t command, uint16_t value);
-uint8_t bt_send_float(void* handle, uint8_t command, float value);
-uint8_t bt_send_float_array(void*handle, uint8_t command, float* array, uint8_t len);
-uint8_t bt_send_str_float(void* handle, uint8_t command, float value);
-uint8_t bt_send_str_float_array(void* handle, uint8_t command, float* array, uint8_t len);
-uint8_t bt_recv(void* handle, bt_header* header, void* data);
-uint8_t bt_try_recv(void* handle, bt_header* header, void* data, uint8_t max_len);
-uint8_t bt_try_recv_user_mass(void* handle, float* user_mass);
+void bt_init(UART_HandleTypeDef* dev_huart, void (*recv_callback)(bt_header*, uint8_t*));
+uint8_t bt_send(uint8_t command, void* data, uint8_t len);
+uint8_t bt_send_str_value(uint8_t command, char* value, int len);
+uint8_t bt_send_str_uint16(uint8_t command, uint16_t value);
+uint8_t bt_send_float(uint8_t command, float value);
+uint8_t bt_send_float_array(uint8_t command, float* array, uint8_t len);
+uint8_t bt_send_str_float(uint8_t command, float value);
+uint8_t bt_send_str_float_array(uint8_t command, float* array, uint8_t len);
+void bt_recv_callback();
+bt_header* bt_get_recv_header();
+uint8_t* bt_get_recv_data();
 
 #endif

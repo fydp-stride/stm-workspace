@@ -1,35 +1,27 @@
 #include "bluetooth_service.h"
 
-uint8_t bt_buf[BT_BUF_SIZE];
+static UART_HandleTypeDef* handle;
+static void (*msg_cb)(bt_header*, uint8_t*);
 
-uint8_t bt_recv_buf[BT_BUF_SIZE];
-uint16_t bt_recv_stage= 0;
-uint8_t is_busy_receiving = 0;
+static uint8_t bt_buf[BT_BUF_SIZE];
 
-bt_header bt_recv_user_mass_hdr;
+static uint8_t bt_recv_buf[BT_BUF_SIZE];
+static uint8_t bt_recv_stage = 0;
 
-// uint8_t bt_send_spi(void* handle, void* buf, uint16_t len) {
-// 	HAL_GPIO_WritePin (BT_CS_GPIO_Port, BT_CS_Pin, GPIO_PIN_RESET);
-// 	uint8_t res = HAL_SPI_Transmit (handle, buf, len, BT_SEND_TIMEOUT);
-// 	HAL_GPIO_WritePin (BT_CS_GPIO_Port, BT_CS_Pin, GPIO_PIN_SET);
-// 	return res;
-// }
+bt_header bt_recv_hdr;
+uint8_t bt_recv_data[BT_BUF_SIZE];
 
-// uint8_t bt_recv_spi(void* handle, void* buf, uint16_t len) {
-// 	HAL_GPIO_WritePin (BT_CS_GPIO_Port, BT_CS_Pin, GPIO_PIN_RESET);
-// 	uint8_t res = HAL_SPI_Receive (handle, buf, len, BT_SEND_TIMEOUT);
-// 	HAL_GPIO_WritePin (BT_CS_GPIO_Port, BT_CS_Pin, GPIO_PIN_SET);
-// 	return res;
-// }
+void bt_init(UART_HandleTypeDef* dev_huart, void (*msg_callback)(bt_header*, uint8_t*)) {
+	handle = dev_huart;
+	msg_cb = msg_callback;
 
-static void print_hex(uint8_t* data, uint32_t len) {
-	for (uint32_t i = 0; i < len; i++) {
-		printf("%02x ", data[i]);
-	}
-	printf("\r\n");
+	bt_recv_stage = 0;
+	// starting waiting for messages to be received
+	// the first byte will likely be a sync byte
+	HAL_UART_Receive_IT(handle, bt_recv_buf, sizeof(uint8_t));
 }
 
-uint8_t bt_send(void* handle, uint8_t command, void* data, uint8_t len) {
+uint8_t bt_send(uint8_t command, void* data, uint8_t len) {
 	if (len < 0 || len == SYNC_BYTE) {
 		return BT_ERR;
 	}
@@ -53,7 +45,6 @@ uint8_t bt_send(void* handle, uint8_t command, void* data, uint8_t len) {
 
 	header_buf->len = buf_len - sizeof(bt_header);
 
-	print_hex(bt_buf, buf_len);
 	if (HAL_UART_Transmit(handle, bt_buf, buf_len, BT_SEND_TIMEOUT) != 0) {
 		return BT_ERR;
 	}
@@ -61,15 +52,15 @@ uint8_t bt_send(void* handle, uint8_t command, void* data, uint8_t len) {
 	return BT_OK;
 }
 
-uint8_t bt_send_float(void* handle, uint8_t command, float value) {
-	return bt_send(handle, command, &value, sizeof(float));
+uint8_t bt_send_float(uint8_t command, float value) {
+	return bt_send(command, &value, sizeof(float));
 }
 
-uint8_t bt_send_float_array(void*handle, uint8_t command, float* array, uint8_t len) {
-	return bt_send(handle, command, array, sizeof(float) * len);
+uint8_t bt_send_float_array(uint8_t command, float* array, uint8_t len) {
+	return bt_send(command, array, sizeof(float) * len);
 }
 
-uint8_t bt_send_str_value(void* handle, uint8_t command, char* value, int len) {
+uint8_t bt_send_str_value(uint8_t command, char* value, int len) {
 	if (len <= 0) {
 		return BT_ERR;
 	}
@@ -93,19 +84,19 @@ uint8_t bt_send_str_value(void* handle, uint8_t command, char* value, int len) {
 	return BT_OK;
 }
 
-uint8_t bt_send_str_uint16(void* handle, uint8_t command, uint16_t value) {
+uint8_t bt_send_str_uint16(uint8_t command, uint16_t value) {
 	char str_buf[BT_BUF_SIZE];
 	int len = sprintf(str_buf, "%d", value);
-	return bt_send_str_value(handle, command, str_buf, len);
+	return bt_send_str_value(command, str_buf, len);
 }
 
-uint8_t bt_send_str_float(void* handle, uint8_t command, float value) {
+uint8_t bt_send_str_float(uint8_t command, float value) {
 	char str_buf[BT_BUF_SIZE];
 	int len = sprintf(str_buf, "%.2f", value);
-	return bt_send_str_value(handle, command, str_buf, len);
+	return bt_send_str_value(command, str_buf, len);
 }
 
-uint8_t bt_send_str_float_array(void* handle, uint8_t command, float* array, uint8_t len) {
+uint8_t bt_send_str_float_array(uint8_t command, float* array, uint8_t len) {
 	if (len == 0) {
 		return BT_ERR;
 	}
@@ -119,99 +110,37 @@ uint8_t bt_send_str_float_array(void* handle, uint8_t command, float* array, uin
 		}
 		str_len += res;
 	}
-	return bt_send_str_value(handle, command, str_buf, str_len);
+	return bt_send_str_value(command, str_buf, str_len);
 }
 
-uint8_t bt_recv(void* handle, bt_header* header, void* data) {
-	uint8_t cmd;
-	uint8_t len;
-
-	do {
-		uint8_t sync;
-		do {
-			if (HAL_UART_Receive(handle, &sync, sizeof(uint8_t), BT_RECV_TIMEOUT) != 0) {
-				return BT_ERR;
-			}
-		} while (sync != SYNC_BYTE);
-		if (HAL_UART_Receive(handle, &cmd, sizeof(uint8_t), BT_RECV_TIMEOUT) != 0) {
-			return BT_ERR;
-		}
-	} while (cmd == SYNC_BYTE);
-
-	if (HAL_UART_Receive(handle, &len, sizeof(uint8_t), BT_RECV_TIMEOUT) != 0) {
-		return BT_ERR;
-	}
-	if (HAL_UART_Receive(handle, bt_buf, len, BT_RECV_TIMEOUT) != 0) {
-		return BT_ERR;
-	}
-	char* data_bytes = (char*)data;
-	uint8_t data_len = 0;
-	uint8_t i = 0;
-	while (i < len) {
- 		if (bt_buf[i] == SYNC_BYTE) {
- 			data_bytes[data_len] = SYNC_BYTE;
-			i += 2;
-		} else {
-			data_bytes[data_len] = bt_buf[i];
-			i++;
-		}
- 		data_len++;
-	}
-	header->cmd = cmd;
-	header->len = data_len;
-
-	return 0;
-}
-
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+void bt_recv_callback()
 {
-	is_busy_receiving = 0;
+	// there are 4 stages to receiving a bluetooth message
+	// 0 -> RESET
+	// 1 -> Receive SYNC
+	// 2 -> Receive CMD
+	// 3 -> Receive LEN
+	// 4 -> Receive DATA
+	// the bluetooth state is incremented each time the UART receive callback is triggered
 	bt_recv_stage++;
-}
 
-//uint8_t bt_process_recv(void* recv_buf, uint8_t len, bt_header* header, void* data) {
-//	// +1 sync byte
-//	if (len < sizeof(bt_header) + 1) {
-//		return BT_ERR;
-//	}
-//	header->cmd = recv_buf[0];
-//	header->len = recv_buf[1];
-//	// +1 sync byte
-//	if (sizeof(bt_header) + header->len + 1 != len) {
-//		return BT_ERR;
-//	}
-//	uint8_t data_len = 0;
-//	uint8_t i = 0;
-//	while (i < len) {
-//		if (bt_buf[i] == SYNC_BYTE) {
-//			data[data_len] = SYNC_BYTE;
-//			i += 2;
-//		} else {
-//			data[data_len] = bt_buf[i];
-//			i++;
-//		}
-//		data_len++;
-//	}
-//
-//	return 0;
-//}
-
-uint8_t bt_try_recv(void* handle, bt_header* header, void* data, uint8_t max_len) {
-	if (is_busy_receiving) {
-		return BT_BUSY;
-	}
-	uint8_t has_received_msg = 0;
 	if ((bt_recv_stage == BT_RECV_SYNC && bt_recv_buf[0] != SYNC_BYTE) || (bt_recv_stage == BT_RECV_CMD && bt_recv_buf[0] == SYNC_BYTE)) {
+		// If we don't get a sync byte, return to RESET
 		bt_recv_stage = BT_RECV_RESET;
 	} else if (bt_recv_stage == BT_RECV_CMD) {
-		header->cmd = bt_recv_buf[0];
+		// Record the command
+		bt_recv_hdr.cmd = bt_recv_buf[0];
 	} else if (bt_recv_stage == BT_RECV_LEN) {
-		header->len = bt_recv_buf[0];
+		// Record the length of the data
+		bt_recv_hdr.len = bt_recv_buf[0];
 	} else if (bt_recv_stage == BT_RECV_DATA) {
-		char* data_bytes = (char*)data;
+		// Record the data
+		char* data_bytes = (char*)bt_recv_data;
+		// data_bytes is indexed by data_len because it may be shorter than recv_buf due to duplicate sync bytes
 		uint8_t data_len = 0;
 		uint8_t i = 0;
-		while (i < header->len && data_len <= max_len) {
+		while (i < bt_recv_hdr.len) {
+			// two sync bytes are used to escape the sync byte value
 			if (bt_recv_buf[i] == SYNC_BYTE) {
 				data_bytes[data_len] = SYNC_BYTE;
 				i += 2;
@@ -221,23 +150,19 @@ uint8_t bt_try_recv(void* handle, bt_header* header, void* data, uint8_t max_len
 			}
 			data_len++;
 		}
-		if (data_len <= max_len) {
-			header->len = data_len;
-			has_received_msg = 1;
-		}
+		bt_recv_hdr.len = data_len;
 		bt_recv_stage = BT_RECV_RESET;
+
+		// callback function to handle received message
+		(*msg_cb)(&bt_recv_hdr, bt_recv_data);
 	}
-	is_busy_receiving = 1;
+
+	// a call to HAL_UART_Receive_IT is followed by a callback to HAL_UART_RxCpltCallback
 	if (bt_recv_stage < BT_RECV_LEN) {
+		// We are receiving 1 byte header data: sync, cmd or len
 		HAL_UART_Receive_IT(handle, bt_recv_buf, sizeof(uint8_t));
 	} else {
-		HAL_UART_Receive_IT(handle, bt_recv_buf, (uint16_t)header->len);
+		// We are receiving the data
+		HAL_UART_Receive_IT(handle, bt_recv_buf, (uint16_t)bt_recv_hdr.len);
 	}
-
-	return has_received_msg ? BT_OK : BT_BUSY;
-}
-
-uint8_t bt_try_recv_user_mass(void* handle, float* user_mass) {
-	uint8_t res = bt_try_recv(handle, &bt_recv_user_mass_hdr, user_mass, sizeof(float));
-	return (res == BT_OK && bt_recv_user_mass_hdr.cmd == WEIGHT_CMD) ? BT_OK : BT_BUSY;
 }

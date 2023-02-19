@@ -219,5 +219,5 @@ uint8_t bt_try_recv(void* handle, bt_header* header, void* data, uint8_t max_len
 
 uint8_t bt_try_recv_user_mass(void* handle, float* user_mass) {
 	uint8_t res = bt_try_recv(handle, &bt_recv_user_mass_hdr, user_mass, sizeof(float));
-	return (res == BT_OK && bt_recv_user_mass_hdr.cmd == WEIGHT_CMD) ? BT_OK : BT_BUSY;
+	return (res == BT_OK && bt_recv_user_mass_hdr.cmd == BT_WEIGHT_CMD) ? BT_OK : BT_BUSY;
 }

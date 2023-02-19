@@ -24,16 +24,21 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <math.h>
 #include <string.h>
+
 #include "retarget.h"
+#include "fatfs_sd.h"
+
 #include "sensor_service.h"
 #include "data_service.h"
 #include "bluetooth_service.h"
-#include "fatfs_sd.h"
 #include "sd_logger.h"
 #include "bno055_stm32.h"
 #include "bq27441.h"
+#include "debug_console.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -53,9 +58,10 @@
 // low power interval
 #define SEND_STEP_DATA_LP_INTERVAL 1000
 #define SEND_BATT_DATA_INTERVAL 60000
-#define LOW_POWER_THRESHOLD 20
+#define DEFAULT_LOW_POWER_THRESHOLD 20
 
 #define SD_CARD_INIT_INTERVAL 500
+
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -90,9 +96,10 @@ UART_HandleTypeDef huart2;
 /* USER CODE BEGIN PV */
 
 float user_mass;
-float new_user_mass;
+int low_power_threshold = 20;
 uint16_t batt_percent;
 
+// Buffers
 force_point force_buf[FORCE_BUF_CAPACITY];
 float impulse_buffer;
 float impact_angle_buffer[IMPACT_ANGLE_BUF_CAPACITY];
@@ -100,12 +107,11 @@ uint32_t impact_angle_buffer_size;
 float impact_force_buffer[IMPACT_FORCE_BUF_CAPACITY];
 uint32_t impact_force_buffer_size;
 
-uint8_t test_buf[100];
-
-uint8_t is_batt_connected = 1;
-uint8_t is_sd_card_inserted = 0;
-uint8_t is_logging = 0;
-uint8_t is_sd_init_attempted = 0;
+bool is_low_power_threshold_updated = false;
+bool is_batt_connected = true;
+bool is_sd_card_inserted = false;
+bool is_logging = false;
+bool is_sd_init_attempted = false;
 FIL log_file;
 
 uint32_t last_sd_card_init_time;
@@ -116,12 +122,12 @@ uint32_t last_sd_card_init_time;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
-static void MX_USART1_UART_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_I2C1_Init(void);
-static void MX_SPI1_Init(void);
 static void MX_I2C3_Init(void);
+static void MX_SPI1_Init(void);
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 void print_hex(char* data, uint32_t len);
@@ -147,13 +153,13 @@ uint32_t diff_time(uint32_t start, uint32_t end) {
 	}
 }
 
-uint8_t get_is_sd_card_inserted() {
+bool get_is_sd_card_inserted() {
   GPIO_PinState sd_cd_state = HAL_GPIO_ReadPin(SD_CD_GPIO_Port, SD_CD_Pin);
-  return sd_cd_state == GPIO_PIN_SET ? 1 : 0;
+  return sd_cd_state == GPIO_PIN_SET;
 }
 
 uint8_t get_is_batt_low_power() {
-  return batt_percent < LOW_POWER_THRESHOLD;
+  return batt_percent < (float)low_power_threshold;
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
@@ -164,6 +170,50 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
         last_sd_card_init_time = HAL_GetTick();
       }
     }
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+  if (huart == &huart1) {
+    dbg_callback();
+  } else {
+    bt_recv_callback();
+  }
+}
+
+void handle_bt_message(bt_header* header, uint8_t* data) {
+  switch (header->cmd) {
+    case BT_WEIGHT_CMD:
+      user_mass = *(float*)(data);
+      printf("New user mass: %f\r\n", user_mass);
+      break;
+
+    case BT_CALIBRATE_CMD:
+      printf("Received calibration command\r\n");
+      // TODO: implement angle calibration
+      break;
+  }
+}
+
+void handle_dbg_command(uint8_t cmd, char* value) {
+  switch (cmd) {
+    case DBG_LPTHRESH_CMD: {
+      // convert value string to base 10 integer
+      long new_lp_threshold = strtol(value, NULL, 10);
+      low_power_threshold = new_lp_threshold;
+      is_low_power_threshold_updated = true;
+      printf("Setting low power battery threshold to %d\r\n", low_power_threshold);
+      break;
+    }
+
+    case DBG_CALIBRATE_CMD:
+      // TODO: implement angle calibration
+      printf("Calibrated.\r\n");
+      break;
+
+    default:
+      printf("Unknown command\r\n");
+      break;
+  }
 }
 
 /* USER CODE END 0 */
@@ -197,13 +247,13 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_USART2_UART_Init();
-  MX_USART1_UART_Init();
   MX_TIM1_Init();
   MX_TIM2_Init();
   MX_FATFS_Init();
   MX_I2C1_Init();
-  MX_SPI1_Init();
   MX_I2C3_Init();
+  MX_SPI1_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
   RetargetInit(&huart1);
@@ -218,9 +268,12 @@ int main(void)
   }
   if (!BQ27441_init(&hi2c3)) {
     printf("[Warning] [main] Battery monitor initialization failed\r\n");
-    is_batt_connected = 0;
+    is_batt_connected = false;
   }
   is_sd_card_inserted = get_is_sd_card_inserted();
+
+  dbg_init(&huart1, handle_dbg_command);
+  bt_init(&huart2, handle_bt_message);
 
   HAL_TIM_Base_Start(&htim1);
   HAL_TIM_Base_Start(&htim2);
@@ -265,7 +318,7 @@ int main(void)
       // before attempting init
       // if (HAL_GetTick() - last_sd_card_init_time > SD_CARD_INIT_INTERVAL) {
       last_sd_card_init_time = HAL_GetTick();
-      is_sd_init_attempted = 1;
+      is_sd_init_attempted = true;
       is_logging = sd_logger_init(&log_file) == SD_OK;
       if (is_logging) {
         printf("[Info] [main] SD card initialized\r\n");
@@ -276,8 +329,8 @@ int main(void)
     } else if (!is_sd_card_inserted && is_logging) {
       printf("[Info] [main] SD card ejected\r\n");
       sd_logger_terminate(&log_file);
-      is_logging = 0;
-      is_sd_init_attempted = 0;
+      is_logging = false;
+      is_sd_init_attempted = false;
     }
 
 	  force_point* force_pt = &force_buf[data_buf_idx];
@@ -423,9 +476,9 @@ int main(void)
 	  uint8_t is_low_power = get_is_batt_low_power();
     uint32_t bt_send_interval = (is_low_power ? SEND_STEP_DATA_LP_INTERVAL : SEND_STEP_DATA_INTERVAL);
 	  if (HAL_GetTick() - last_send_step_time > bt_send_interval) {
-		  bt_send_str_float(&huart2, IMPULSE_CMD, impulse_buffer);
-		  bt_send_str_float_array(&huart2, ANGLE_CMD, impact_angle_buffer, impact_angle_buffer_size);
-		  bt_send_str_float_array(&huart2, MAX_FORCE_CMD, impact_force_buffer, impact_force_buffer_size);
+		  bt_send_str_float(BT_IMPULSE_CMD, impulse_buffer);
+		  bt_send_str_float_array(BT_ANGLE_CMD, impact_angle_buffer, impact_angle_buffer_size);
+		  bt_send_str_float_array(BT_MAX_FORCE_CMD, impact_force_buffer, impact_force_buffer_size);
 		  impulse_buffer = 0;
 		  impact_angle_buffer_size = 0;
 		  impact_force_buffer_size = 0;
@@ -433,10 +486,13 @@ int main(void)
 	  }
 
     // check battery percentage, send batt data, and update power indicator light
-	  if (is_first_loop || HAL_GetTick() - last_send_batt_time > SEND_BATT_DATA_INTERVAL) {
+	  if (
+      is_first_loop || is_low_power_threshold_updated || 
+      HAL_GetTick() - last_send_batt_time > SEND_BATT_DATA_INTERVAL
+    ) {
 		  batt_percent = is_batt_connected ? BQ27441_soc(FILTERED) : 100;
       printf("[Info] [main] battery_percent=%d\r\n", batt_percent);
-		  bt_send_str_uint16(&huart2, BATT_CMD, batt_percent);
+		  bt_send_str_uint16(BT_BATT_CMD, batt_percent);
 		  last_send_batt_time = HAL_GetTick();
 
       if (is_low_power) {
@@ -446,12 +502,8 @@ int main(void)
         HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_SET);
         HAL_GPIO_WritePin(LED_RED_GPIO_Port, LED_RED_Pin, GPIO_PIN_RESET);
       }
-	  }
 
-	  uint8_t recv_result = bt_try_recv_user_mass(&huart2, &new_user_mass);
-	  if (recv_result == BT_OK) {
-		  printf("New user mass: %f\r\n", new_user_mass);
-		  user_mass = new_user_mass;
+      is_low_power_threshold_updated = false;
 	  }
 
 	  data_buf_idx = (data_buf_idx + 1) % FORCE_BUF_CAPACITY;
@@ -839,19 +891,10 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(SD_CS_GPIO_Port, SD_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(PWR_LED_GPIO_Port, PWR_LED_Pin, GPIO_PIN_SET);
-
-  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LED_RED_GPIO_Port, LED_RED_Pin, GPIO_PIN_RESET);
-
-  /*Configure GPIO pin : PWR_BTN_Pin */
-  GPIO_InitStruct.Pin = PWR_BTN_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(PWR_BTN_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : SD_CS_Pin LED_RED_Pin */
   GPIO_InitStruct.Pin = SD_CS_Pin|LED_RED_Pin;
@@ -860,12 +903,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PWR_LED_Pin LED_GREEN_Pin */
-  GPIO_InitStruct.Pin = PWR_LED_Pin|LED_GREEN_Pin;
+  /*Configure GPIO pin : LED_GREEN_Pin */
+  GPIO_InitStruct.Pin = LED_GREEN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_Init(LED_GREEN_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : FG_CHG_Pin */
   GPIO_InitStruct.Pin = FG_CHG_Pin;
@@ -880,9 +923,6 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(SD_CD_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
-
   HAL_NVIC_SetPriority(EXTI3_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI3_IRQn);
 
