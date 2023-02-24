@@ -20,7 +20,7 @@
 #define BT_SEND_TIMEOUT 100
 #define BT_RECV_TIMEOUT 10000
 #define SYNC_BYTE 0xFF
-#define BT_BUF_SIZE 250
+#define BT_BUF_SIZE 300
 
 #define BT_RECV_RESET 0
 #define BT_RECV_SYNC 1
@@ -48,6 +48,7 @@ uint8_t bt_send_float(uint8_t command, float value);
 uint8_t bt_send_float_array(uint8_t command, float* array, uint8_t len);
 uint8_t bt_send_str_float(uint8_t command, float value);
 uint8_t bt_send_str_float_array(uint8_t command, float* array, uint8_t len);
+uint8_t bt_recv(bt_header* header, void* data);
 void bt_recv_callback();
 bt_header* bt_get_recv_header();
 uint8_t* bt_get_recv_data();

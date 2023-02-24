@@ -18,10 +18,8 @@ typedef struct {
 
 typedef enum {SENSOR_OK,SENSOR_ERR} sensorStatus;
 
-sensorStatus accel_init();
-void accel_sample(accel_vec* accel_data, angle_vec* angle_data);
-
 sensorStatus imu_init(I2C_HandleTypeDef *hi2c_device);
 void imu_sample(accel_vec* accel_data, angle_vec* angle_data);
+void imu_calibrate();
 
 #endif

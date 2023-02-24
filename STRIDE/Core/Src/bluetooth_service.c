@@ -113,6 +113,51 @@ uint8_t bt_send_str_float_array(uint8_t command, float* array, uint8_t len) {
 	return bt_send_str_value(command, str_buf, str_len);
 }
 
+uint8_t bt_recv(bt_header* header, void* data) {
+	uint8_t cmd;
+	uint8_t len;
+
+	do {
+		uint8_t sync;
+		do {
+			if (HAL_UART_Receive(handle, &sync, sizeof(uint8_t), BT_RECV_TIMEOUT) != 0) {
+				printf("No sync\r\n");
+				return BT_ERR;
+			}
+		} while (sync != SYNC_BYTE);
+		if (HAL_UART_Receive(handle, &cmd, sizeof(uint8_t), BT_RECV_TIMEOUT) != 0) {
+			printf("No command\r\n");
+			return BT_ERR;
+		}
+	} while (cmd == SYNC_BYTE);
+
+	if (HAL_UART_Receive(handle, &len, sizeof(uint8_t), BT_RECV_TIMEOUT) != 0) {
+		printf("No length\r\n");
+		return BT_ERR;
+	}
+	if (HAL_UART_Receive(handle, bt_buf, len, BT_RECV_TIMEOUT) != 0) {
+		printf("No data\r\n");
+		return BT_ERR;
+	}
+	char* data_bytes = (char*)data;
+	uint8_t data_len = 0;
+	uint8_t i = 0;
+	while (i < len) {
+ 		if (bt_buf[i] == SYNC_BYTE) {
+ 			data_bytes[data_len] = SYNC_BYTE;
+			i += 2;
+		} else {
+			data_bytes[data_len] = bt_buf[i];
+			i++;
+		}
+ 		data_len++;
+	}
+	header->cmd = cmd;
+	header->len = data_len;
+
+	return 0;
+}
+
 void bt_recv_callback()
 {
 	// there are 4 stages to receiving a bluetooth message
@@ -125,7 +170,7 @@ void bt_recv_callback()
 	bt_recv_stage++;
 
 	if ((bt_recv_stage == BT_RECV_SYNC && bt_recv_buf[0] != SYNC_BYTE) || (bt_recv_stage == BT_RECV_CMD && bt_recv_buf[0] == SYNC_BYTE)) {
-		// If we don't get a sync byte, return to RESET
+		// If we don't get a sync byte, or we get a misplaced sync byte, return to RESET
 		bt_recv_stage = BT_RECV_RESET;
 	} else if (bt_recv_stage == BT_RECV_CMD) {
 		// Record the command
@@ -161,6 +206,9 @@ void bt_recv_callback()
 	if (bt_recv_stage < BT_RECV_LEN) {
 		// We are receiving 1 byte header data: sync, cmd or len
 		HAL_UART_Receive_IT(handle, bt_recv_buf, sizeof(uint8_t));
+	} else if (bt_recv_stage == BT_RECV_LEN && bt_recv_hdr.len == 0) {
+		// if message length is 0, there is no data to receive, so just invoke callback right away
+		(*msg_cb)(&bt_recv_hdr, bt_recv_data);
 	} else {
 		// We are receiving the data
 		HAL_UART_Receive_IT(handle, bt_recv_buf, (uint16_t)bt_recv_hdr.len);

@@ -188,8 +188,8 @@ void handle_bt_message(bt_header* header, uint8_t* data) {
       break;
 
     case BT_CALIBRATE_CMD:
+      imu_calibrate();
       printf("Received calibration command\r\n");
-      // TODO: implement angle calibration
       break;
   }
 }
@@ -206,7 +206,7 @@ void handle_dbg_command(uint8_t cmd, char* value) {
     }
 
     case DBG_CALIBRATE_CMD:
-      // TODO: implement angle calibration
+      imu_calibrate();
       printf("Calibrated.\r\n");
       break;
 
