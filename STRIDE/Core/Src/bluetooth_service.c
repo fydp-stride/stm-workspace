@@ -22,7 +22,9 @@ void bt_init(UART_HandleTypeDef* dev_huart, void (*msg_callback)(bt_header*, uin
 }
 
 uint8_t bt_send(uint8_t command, void* data, uint8_t len) {
-	if (len < 0 || len == SYNC_BYTE) {
+	// bluetooth module is not able to send more than 95 bytes of data (excluding header size)
+	// all at once.
+	if (len > BT_MAX_DATA_SIZE) {
 		return BT_ERR;
 	}
 	uint8_t* data_bytes = (uint8_t*)data;

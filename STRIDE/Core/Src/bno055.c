@@ -17,6 +17,7 @@ bno055_opmode_t bno055_getOperationMode() {
 }
 
 void bno055_setOperationMode(bno055_opmode_t mode) {
+  bno055_setPage(0);
   bno055_writeData(BNO055_OPR_MODE, mode);
   if (mode == BNO055_OPERATION_MODE_CONFIG) {
     bno055_delay(19);
@@ -71,6 +72,23 @@ void bno055_setup() {
   // Select BNO055 config mode
   bno055_setOperationModeConfig();
   bno055_delay(10);
+}
+
+bno055_return_code_t bno055_set_accel_range(bno055_accel_config_t range) {
+  // BNO055 must be set to config mode to write to config registers
+  if (bno055_getOperationMode() != BNO055_OPERATION_MODE_CONFIG) {
+    return BNO055_RETURN_INVALID_OPERATION_MODE;
+  }
+  bno055_setPage(1);
+  uint8_t tmp;
+  bno055_readData(BNO055_ACC_CONFIG, &tmp, 1);
+  tmp &= 0xfc; // set the least significant 2 bits to zero 
+  range &= 0x03; // keep only least siginficant 2 bits
+  tmp |= range; // assign least significant 2 bits as accel range value
+  bno055_writeData(BNO055_ACC_CONFIG, tmp);
+  bno055_delay(700);
+
+  return BNO055_RETURN_OK;
 }
 
 int16_t bno055_getSWRevision() {

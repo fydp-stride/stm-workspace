@@ -31,13 +31,11 @@ void delay_ms(uint32_t tv)
 /*****************************************************************************
  ************************ I2C Read and Write Routines ************************
  *****************************************************************************/
-static BQ27441_ctx_t ctx = {0};
 static I2C_HandleTypeDef* hi2c = NULL;
 
 /**
   * @brief  Read generic device register
   *
-  * @param  ctx   read / write interface definitions(ptr)
   * @param  reg   register to read
   * @param  len   data len
   * @param  data  pointer to buffer that store the data read(ptr)
@@ -56,7 +54,6 @@ int16_t BQ27441_i2cReadBytes(uint8_t reg, uint8_t *data, uint8_t len)
 /**
   * @brief  Write generic device register
   *
-  * @param  ctx   read / write interface definitions(ptr)
   * @param  reg   register to write
   * @param  data  pointer to data to write in register reg(ptr)
   * @param  len   data len
@@ -90,7 +87,6 @@ static bool BQ27441_executeControlWord (uint16_t function);
 static bool BQ27441_blockDataControl (void);
 static bool BQ27441_blockDataClass (uint8_t id);
 static bool BQ27441_blockDataOffset (uint8_t offset);
-static uint8_t BQ27441_blockDataChecksum (void);
 static uint8_t BQ27441_readBlockData (uint8_t offset);
 static bool BQ27441_writeBlockData (uint8_t offset, uint8_t data);
 static uint8_t BQ27441_computeBlockChecksum (void);
@@ -953,18 +949,6 @@ static bool BQ27441_blockDataOffset(uint8_t offset)
 }
 
 /**
- * Read the current checksum using BlockDataCheckSum()
- *
- * @return true on success
- * */
-static uint8_t BQ27441_blockDataChecksum(void)
-{
-    uint8_t csum;
-    BQ27441_i2cReadBytes(BQ27441_EXTENDED_CHECKSUM, &csum, 1);
-    return csum;
-}
-
-/**
  * @return Use BlockData() to read a byte from the loaded extended data
  *
  * @param offset of data block byte to be read
@@ -1041,7 +1025,6 @@ static uint8_t BQ27441_readExtendedData(uint8_t classID, uint8_t offset) {
     BQ27441_blockDataOffset(offset / 32); // Write 32-bit block offset (usually 0)
 
     BQ27441_computeBlockChecksum(); // Compute checksum going in
-    uint8_t oldCsum = BQ27441_blockDataChecksum();
     retData = BQ27441_readBlockData(offset % 32); // Read from offset (limit to 0-31)
 
     if (!userConfigControl) BQ27441_exitConfig(true);
@@ -1072,7 +1055,6 @@ static bool BQ27441_writeExtendedData(uint8_t classID, uint8_t offset, uint8_t *
 
     BQ27441_blockDataOffset(offset / 32); // Write 32-bit block offset (usually 0)
     BQ27441_computeBlockChecksum(); // Compute checksum going in
-    uint8_t oldCsum = BQ27441_blockDataChecksum();
 
     // Write data bytes:
     for (int i = 0; i < len; i++) {

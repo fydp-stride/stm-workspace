@@ -21,6 +21,7 @@
 #define BT_RECV_TIMEOUT 10000
 #define SYNC_BYTE 0xFF
 #define BT_BUF_SIZE 300
+#define BT_MAX_DATA_SIZE 95
 
 #define BT_RECV_RESET 0
 #define BT_RECV_SYNC 1

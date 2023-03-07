@@ -3,6 +3,8 @@
 
 #include "ADXL.h"
 #include "bno055_stm32.h"
+#include <math.h>
+#include "madgwick.h"
 
 typedef struct {
   float x;
@@ -19,7 +21,7 @@ typedef struct {
 typedef enum {SENSOR_OK,SENSOR_ERR} sensorStatus;
 
 sensorStatus imu_init(I2C_HandleTypeDef *hi2c_device);
-void imu_sample(accel_vec* accel_data, angle_vec* angle_data);
+void imu_sample(accel_vec* accel_data, angle_vec* angle_data, float elapsed_time_us);
 void imu_calibrate();
 
 #endif

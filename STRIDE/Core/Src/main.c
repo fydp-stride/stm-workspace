@@ -336,10 +336,10 @@ int main(void)
 	  force_point* force_pt = &force_buf[data_buf_idx];
 	  force_point* prev_force_pt = &force_buf[(data_buf_idx - 1) % FORCE_BUF_CAPACITY];
 
-    imu_sample(&accel_data, &force_pt->angle);
-	  force_pt->force = compute_force(&accel_data);
-	  force_pt->elapsed_time = __HAL_TIM_GetCounter(&htim1);
+    force_pt->elapsed_time = __HAL_TIM_GetCounter(&htim1);
 	  __HAL_TIM_SET_COUNTER(&htim1, 0);
+    imu_sample(&accel_data, &force_pt->angle, force_pt->elapsed_time);
+	  force_pt->force = compute_force(&accel_data);
 	  
 	  if (is_logging) {
 		  f_printf(
@@ -354,9 +354,12 @@ int main(void)
         (int32_t)(force_pt->angle.yaw * 1000)
       );
 	  }
-	  // printf("%.2f, %.2f, %.2f\r\n", accel_data.x, accel_data.y, accel_data.z);
-    // HAL_Delay(100);
-//	  printf("%ld, %ld\r\n", (uint32_t)force_pt->elapsed_time, (uint32_t)force_pt->force);
+
+    // if (accel_data.y == 0) {
+    //   HAL_GPIO_WritePin(LED_RED_GPIO_Port, LED_RED_Pin, GPIO_PIN_SET);
+    // } else {
+    //   HAL_GPIO_WritePin(LED_RED_GPIO_Port, LED_RED_Pin, GPIO_PIN_RESET);
+    // }
 
 	  new_peak_force.index = -1; // -1 means no new peak force
 	  if (!is_first_loop) {
@@ -380,7 +383,9 @@ int main(void)
 	  if (new_peak_force.index != -1) {
 		  last_peak_force_time = HAL_GetTick();
 		  peak_force_buf[peak_force_buf_size] = new_peak_force;
-		  peak_force_buf_size++;
+      // in the rare case that there are more peak forces that the buffer can handle,
+      // just keep overwriting the last entry
+      peak_force_buf_size = min(peak_force_buf_size + 1, PEAK_FORCE_BUF_CAPACITY - 1);
 //		   printf("Peak %ld %ld\r\n", (uint32_t)new_peak_force.force, last_peak_force_time);
 	  }
 
@@ -437,8 +442,8 @@ int main(void)
 			  impact_angle_buffer[impact_angle_buffer_size] = max(peak_angle->roll, max(peak_angle->pitch, peak_angle->yaw));
 			  impact_force_buffer[impact_force_buffer_size] = max_peak_force->force;
 
-			  impact_angle_buffer_size = min(impact_angle_buffer_size + 1, IMPACT_ANGLE_BUF_CAPACITY);
-			  impact_force_buffer_size = min(impact_force_buffer_size + 1, IMPACT_FORCE_BUF_CAPACITY);
+			  impact_angle_buffer_size = min(impact_angle_buffer_size + 1, IMPACT_ANGLE_BUF_CAPACITY - 1);
+			  impact_force_buffer_size = min(impact_force_buffer_size + 1, IMPACT_FORCE_BUF_CAPACITY - 1);
 
 			  printf(
           "Step - Impulse: %f, Max Force: %f, Angle: %f %f %f\r\n",
@@ -476,6 +481,9 @@ int main(void)
 	  uint8_t is_low_power = get_is_batt_low_power();
     uint32_t bt_send_interval = (is_low_power ? SEND_STEP_DATA_LP_INTERVAL : SEND_STEP_DATA_INTERVAL);
 	  if (HAL_GetTick() - last_send_step_time > bt_send_interval) {
+      // HAL_GPIO_TogglePin(LED_GREEN_GPIO_Port, LED_GREEN_Pin);
+      // printf("%.2f, %.2f, %.2f\r\n", accel_data.x, accel_data.y, accel_data.z);
+      // printf("%.2f, %.2f, %.2f\r\n", force_pt->angle.roll, force_pt->angle.pitch, force_pt->angle.yaw);
 		  bt_send_str_float(BT_IMPULSE_CMD, impulse_buffer);
 		  bt_send_str_float_array(BT_ANGLE_CMD, impact_angle_buffer, impact_angle_buffer_size);
 		  bt_send_str_float_array(BT_MAX_FORCE_CMD, impact_force_buffer, impact_force_buffer_size);

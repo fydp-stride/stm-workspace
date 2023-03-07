@@ -183,6 +183,13 @@ typedef enum {  // BNO-55 operation modes
   BNO055_OPERATION_MODE_NDOF  // 0x0C
 } bno055_opmode_t;
 
+typedef enum {
+  BNO055_ACCEL_RANGE_2G = 0b00,
+  BNO055_ACCEL_RANGE_4G = 0b01,
+  BNO055_ACCEL_RANGE_8G = 0b10,
+  BNO055_ACCEL_RANGE_16G = 0b11
+} bno055_accel_config_t;
+
 typedef struct {
   uint8_t mcuState;
   uint8_t gyrState;
@@ -259,6 +266,11 @@ enum bno055_system_error_t {
   BNO055_SYSTEM_ERROR_SENSOR_CONF_ERROR = 0x0A
 };
 
+typedef enum {
+  BNO055_RETURN_OK,
+  BNO055_RETURN_INVALID_OPERATION_MODE
+} bno055_return_code_t;
+
 enum bno055_axis_map_representation_t {
   BNO055_AXIS_X = 0x00,
   BNO055_AXIS_Y = 0x01,
@@ -282,6 +294,7 @@ void bno055_setOperationModeNDOF();
 void bno055_enableExternalCrystal();
 void bno055_disableExternalCrystal();
 void bno055_setup();
+bno055_return_code_t bno055_set_accel_range(bno055_accel_config_t range);
 
 int8_t bno055_getTemp();
 
