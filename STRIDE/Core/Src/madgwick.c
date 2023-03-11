@@ -30,8 +30,6 @@ void madgwick_init(float beta, float ax, float ay, float az, float mx, float my)
 	float pitch = -atan2f(ax, az);
     float yaw = -atan2f(my, mx);
 
-    printf("> %.2f, %.2f, %.2f\r\n", roll * 57.2957795147f, pitch * 57.2957795147f, yaw * 57.2957795147f);
-
     // Auxiliary variables to avoid repeated arithmetic
     float cr = cos(roll * 0.5);
     float sr = sin(roll * 0.5);

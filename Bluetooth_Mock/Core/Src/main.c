@@ -136,7 +136,7 @@ int main(void)
     printf("Sending.\r\n");
 
     bt_send_str_float(&huart2, BT_IMPULSE_CMD, rand_accumulated_impulse);
-    bt_send_str_float_array(&huart2, BT_ANGLE_CMD, rand_angles, rand_angle_buf_size);
+    bt_send_str_float_array(&huart2, BT_ANGLE_ROLL_CMD, rand_angles, rand_angle_buf_size);
     bt_send_str_float_array(&huart2, BT_MAX_FORCE_CMD, rand_max_forces, rand_max_force_buf_size);
 
     HAL_Delay(1000);

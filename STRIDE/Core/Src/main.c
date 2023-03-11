@@ -47,7 +47,7 @@
 #define IMPACT_ANGLE_BUF_CAPACITY 50
 #define IMPACT_FORCE_BUF_CAPACITY 50
 
-#define PEAK_TIME_THRESH_MILLIS 100
+#define MIN_STEP_SEPARATION_MILLIS 200
 #define PEAK_FORCE_BUF_CAPACITY 100
 
 #define MAX_INT_32 0xffffffff
@@ -102,7 +102,8 @@ uint16_t batt_percent;
 // Buffers
 force_point force_buf[FORCE_BUF_CAPACITY];
 float impulse_buffer;
-float impact_angle_buffer[IMPACT_ANGLE_BUF_CAPACITY];
+float impact_roll_buffer[IMPACT_ANGLE_BUF_CAPACITY];
+float impact_pitch_buffer[IMPACT_ANGLE_BUF_CAPACITY];
 uint32_t impact_angle_buffer_size;
 float impact_force_buffer[IMPACT_FORCE_BUF_CAPACITY];
 uint32_t impact_force_buffer_size;
@@ -293,6 +294,7 @@ int main(void)
 
   impulse_buffer = 0;
   impact_angle_buffer_size = 0;
+  impact_pitch_buffer_size = 0;
   impact_force_buffer_size = 0;
 
   float force_baseline = user_mass * GRAV_ACCEL;
@@ -366,7 +368,7 @@ int main(void)
 		  uint8_t force_is_increasing = force_pt->force > prev_force_pt->force;
 		  if (!is_force_spike) {
 			  // decreasing -> decreasing
-			  if (force_pt->force > high_force_threshold && force_is_increasing) {
+			  if (force_pt->force > step_threshold && force_is_increasing) {
 				  // decreasing -> increasing
 				  is_force_spike = 1;
 			  }
@@ -390,7 +392,7 @@ int main(void)
 	  }
 
 	  // batch forces together, each batch of forces are caused by the same step
-	  if (diff_time(last_peak_force_time, HAL_GetTick()) > PEAK_TIME_THRESH_MILLIS) {
+	  if (diff_time(last_peak_force_time, HAL_GetTick()) > MIN_STEP_SEPARATION_MILLIS) {
 		  uint8_t is_step = 0;
 		  peak_force_point* max_peak_force = 0;
 
@@ -439,7 +441,8 @@ int main(void)
 
 			  angle_vec* peak_angle = &force_buf[max_peak_force->index].angle;
 			  // get maximum of the 3 angles
-			  impact_angle_buffer[impact_angle_buffer_size] = max(peak_angle->roll, max(peak_angle->pitch, peak_angle->yaw));
+			  impact_roll_buffer[impact_angle_buffer_size] = peak_angle->roll;
+        impact_pitch_buffer[impact_angle_buffer_size] = peak_angle->pitch;
 			  impact_force_buffer[impact_force_buffer_size] = max_peak_force->force;
 
 			  impact_angle_buffer_size = min(impact_angle_buffer_size + 1, IMPACT_ANGLE_BUF_CAPACITY - 1);
@@ -449,9 +452,9 @@ int main(void)
           "Step - Impulse: %f, Max Force: %f, Angle: %f %f %f\r\n",
           impulse_buffer,
           max_peak_force->force,
-          peak_angle->yaw,
           peak_angle->roll,
-          peak_angle->pitch
+          peak_angle->pitch,
+          peak_angle->yaw
         );
 
         if (is_logging) {
@@ -485,7 +488,8 @@ int main(void)
       // printf("%.2f, %.2f, %.2f\r\n", accel_data.x, accel_data.y, accel_data.z);
       // printf("%.2f, %.2f, %.2f\r\n", force_pt->angle.roll, force_pt->angle.pitch, force_pt->angle.yaw);
 		  bt_send_str_float(BT_IMPULSE_CMD, impulse_buffer);
-		  bt_send_str_float_array(BT_ANGLE_CMD, impact_angle_buffer, impact_angle_buffer_size);
+		  bt_send_str_float_array(BT_ANGLE_ROLL_CMD, impact_roll_buffer, impact_angle_buffer_size);
+      bt_send_str_float_array(BT_ANGLE_PITCH_CMD, impact_pitch_buffer, impact_angle_buffer_size);
 		  bt_send_str_float_array(BT_MAX_FORCE_CMD, impact_force_buffer, impact_force_buffer_size);
 		  impulse_buffer = 0;
 		  impact_angle_buffer_size = 0;

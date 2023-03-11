@@ -8,7 +8,7 @@
 
 #define IMPULSE_CMD 0x01
 #define MAX_FORCE_CMD 0x02
-#define ANGLE_CMD 0x03
+#define BT_ANGLE_ROLL_CMD 0x03
 #define BT_BATT_CMD 0x04
 #define BT_WEIGHT_CMD 0x05
 #define BT_RESPONSE_CMD 0x06
