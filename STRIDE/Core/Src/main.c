@@ -50,14 +50,17 @@
 #define MIN_STEP_SEPARATION_MILLIS 200
 #define PEAK_FORCE_BUF_CAPACITY 100
 
+#define BATTERY_BUF_CAPACITY 100
+
 #define MAX_INT_32 0xffffffff
 
 #define LOG_SYNC_INTERVAL 5000
 
-#define SEND_STEP_DATA_INTERVAL 500
+#define SEND_STEP_DATA_INTERVAL 490
 // low power interval
-#define SEND_STEP_DATA_LP_INTERVAL 1000
+#define SEND_STEP_DATA_LP_INTERVAL 990
 #define SEND_BATT_DATA_INTERVAL 60000
+#define BATT_UPDATE_INTERVAL 500
 #define DEFAULT_LOW_POWER_THRESHOLD 20
 
 #define SD_CARD_INIT_INTERVAL 500
@@ -97,7 +100,8 @@ UART_HandleTypeDef huart2;
 
 float user_mass;
 int low_power_threshold = 20;
-uint16_t batt_percent;
+uint16_t batt_charge_buffer[BATTERY_BUF_CAPACITY];
+uint16_t batt_charge_idx;
 
 // Buffers
 force_point force_buf[FORCE_BUF_CAPACITY];
@@ -159,8 +163,40 @@ bool get_is_sd_card_inserted() {
   return sd_cd_state == GPIO_PIN_SET;
 }
 
+uint16_t get_avg_batt_charge() {
+  if (!is_batt_connected) {
+    return 100;
+  }
+  
+  uint16_t batt_charge_sum = 0;
+  for (uint16_t i = 0; i < BATTERY_BUF_CAPACITY; i++) {
+    batt_charge_sum += batt_charge_buffer[i];
+  }
+  return batt_charge_sum / BATTERY_BUF_CAPACITY;
+}
+
+void update_batt_charge() {
+  if (!is_batt_connected) {
+    return;
+  }
+  uint16_t batt_soc_result = BQ27441_soc(FILTERED);
+  if (batt_soc_result == 0 || batt_soc_result > 100) {
+    return;
+  }
+
+  if (get_avg_batt_charge() == 0) {
+    for (uint16_t i = 0; i < BATTERY_BUF_CAPACITY; i++) {
+      batt_charge_buffer[i] = batt_soc_result;
+    }
+  } else {
+    batt_charge_buffer[batt_charge_idx] = batt_soc_result;
+    batt_charge_idx = (batt_charge_idx + 1) % BATTERY_BUF_CAPACITY;
+  }
+}
+
 uint8_t get_is_batt_low_power() {
-  return batt_percent < (float)low_power_threshold;
+  uint16_t batt_charge = get_avg_batt_charge();
+  return batt_charge > 0 && batt_charge < (float)low_power_threshold;
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
@@ -259,10 +295,6 @@ int main(void)
 
   RetargetInit(&huart1);
 
-  // if (accel_init() != SENSOR_OK) {
-	//   printf("Accelerometer initialization failed\r\n");
-	//   return 0;
-  // }
   if (imu_init(&hi2c1) != SENSOR_OK) {
     printf("[Fatal] [main] IMU initialization failed\r\n");
     return 0;
@@ -290,11 +322,10 @@ int main(void)
   uint32_t last_peak_force_time = 0;
 
   user_mass = 65;
-  batt_percent = is_batt_connected ? BQ27441_soc(FILTERED) : 100;
+  batt_charge_idx = 0;
 
   impulse_buffer = 0;
   impact_angle_buffer_size = 0;
-  impact_pitch_buffer_size = 0;
   impact_force_buffer_size = 0;
 
   float force_baseline = user_mass * GRAV_ACCEL;
@@ -303,7 +334,8 @@ int main(void)
 
   uint32_t last_log_sync_time = HAL_GetTick();
   uint32_t last_send_step_time = HAL_GetTick();
-  uint32_t last_send_batt_time = HAL_GetTick();
+  uint32_t last_send_batt_time = HAL_GetTick() - SEND_BATT_DATA_INTERVAL;
+  uint32_t last_update_batt_time = HAL_GetTick() - BATT_UPDATE_INTERVAL;
 
   printf("[Info] [main] Initialization complete.\r\n");
 
@@ -497,15 +529,22 @@ int main(void)
 		  last_send_step_time = HAL_GetTick();
 	  }
 
+    if (HAL_GetTick() - last_update_batt_time > BATT_UPDATE_INTERVAL) {
+      update_batt_charge();
+      last_update_batt_time = HAL_GetTick();
+    }
+
     // check battery percentage, send batt data, and update power indicator light
 	  if (
-      is_first_loop || is_low_power_threshold_updated || 
+      is_low_power_threshold_updated || 
       HAL_GetTick() - last_send_batt_time > SEND_BATT_DATA_INTERVAL
     ) {
-		  batt_percent = is_batt_connected ? BQ27441_soc(FILTERED) : 100;
-      printf("[Info] [main] battery_percent=%d\r\n", batt_percent);
-		  bt_send_str_uint16(BT_BATT_CMD, batt_percent);
-		  last_send_batt_time = HAL_GetTick();
+      uint16_t batt_charge = get_avg_batt_charge();
+      if (batt_charge > 0) {
+        printf("[Info] [main] battery_percent=%d\r\n", batt_charge);
+        bt_send_str_uint16(BT_BATT_CMD, batt_charge);
+        last_send_batt_time = HAL_GetTick();
+      }
 
       if (is_low_power) {
         HAL_GPIO_WritePin(LED_RED_GPIO_Port, LED_RED_Pin, GPIO_PIN_SET);
